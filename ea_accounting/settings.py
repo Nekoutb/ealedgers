@@ -37,13 +37,15 @@ CSRF_TRUSTED_ORIGINS = [
 # --- Apps / middleware -------------------------------------------------------
 
 INSTALLED_APPS = [
+    # `accounting` MUST come before `django.contrib.admin` so our
+    # accounting/templates/admin/base_site.html override wins over Django's default.
+    'accounting',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'accounting',
 ]
 
 MIDDLEWARE = [

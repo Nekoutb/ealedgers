@@ -20,6 +20,28 @@
 
 {% block nav-global %}{% endblock %}
 
+{% block breadcrumbs %}
+<nav class="ea-modnav" aria-label="Accounting module sections">
+  <a href="/workspace/" class="ea-back" title="Back to module launcher">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+    Modules
+  </a>
+  <div class="ea-modnav-links">
+    <a href="/admin/" class="{% if request.path == '/admin/' %}active{% endif %}">Dashboard</a>
+    <a href="/admin/accounting/journalentry/" class="{% if 'journalentry' in request.path %}active{% endif %}">Journal Entries</a>
+    <a href="/admin/accounting/account/" class="{% if '/accounting/account/' in request.path %}active{% endif %}">Chart of Accounts</a>
+    <a href="/admin/accounting/partner/" class="{% if '/accounting/partner/' in request.path %}active{% endif %}">Partners</a>
+    <a href="/admin/accounting/fixedasset/" class="{% if 'fixedasset' in request.path or 'depreciationline' in request.path %}active{% endif %}">Fixed Assets</a>
+    <a href="/admin/accounting/journal/" class="{% if '/accounting/journal/' in request.path or '/accounting/currency/' in request.path or '/accounting/company/' in request.path %}active{% endif %}">Configuration</a>
+  </div>
+</nav>
+{% endblock %}
+
 {% block extrahead %}
 {{ block.super }}
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -76,19 +98,25 @@ html[data-theme="dark"] {
   --selected-bg: #f4f4f4;
   --selected-row: #fafafa;
 
+  --ea-emerald: #0B6E4F;
+  --ea-emerald-dk: #084D37;
+  --ea-emerald-soft: #E1EFE8;
+  --ea-terracotta: #C0563A;
+  --ea-terracotta-dk: #9C4129;
+
   --button-fg: #fff;
-  --button-bg: #000;
-  --button-hover-bg: #2a2a2a;
-  --default-button-bg: #000;
-  --default-button-hover-bg: #2a2a2a;
+  --button-bg: var(--ea-emerald);
+  --button-hover-bg: var(--ea-emerald-dk);
+  --default-button-bg: var(--ea-emerald);
+  --default-button-hover-bg: var(--ea-emerald-dk);
   --close-button-bg: #fff;
   --close-button-hover-bg: #f0f0f0;
-  --delete-button-bg: #000;
-  --delete-button-hover-bg: #2a2a2a;
+  --delete-button-bg: var(--ea-terracotta);
+  --delete-button-hover-bg: var(--ea-terracotta-dk);
 
   --object-tools-fg: #fff;
-  --object-tools-bg: #000;
-  --object-tools-hover-bg: #2a2a2a;
+  --object-tools-bg: var(--ea-emerald);
+  --object-tools-hover-bg: var(--ea-emerald-dk);
 
   --font-family-primary: 'Public Sans', system-ui, -apple-system, sans-serif;
   --font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
@@ -222,6 +250,76 @@ div.breadcrumbs {
 }
 div.breadcrumbs a { color: #000; text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 1px; }
 div.breadcrumbs a:hover { border-bottom-color: #000; }
+
+/* ============================================================
+   EA MODULE SUB-NAV (rendered just below the header)
+   ============================================================ */
+.ea-modnav {
+  background: #fff;
+  border-bottom: 1px solid #E2DCD0;
+  padding: 0 40px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  font-family: 'Public Sans', system-ui, sans-serif;
+}
+.ea-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 14px 0;
+  margin-right: 18px;
+  color: #6E6862 !important;
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  font-weight: 600;
+  text-decoration: none !important;
+  border-right: 1px solid #E2DCD0;
+  border-bottom: none !important;
+  transition: color 0.2s;
+  white-space: nowrap;
+}
+.ea-back:hover { color: var(--ea-emerald) !important; }
+.ea-back svg { flex: none; opacity: 0.85; }
+.ea-modnav-links {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+}
+.ea-modnav-links a {
+  padding: 16px 20px;
+  text-decoration: none !important;
+  color: #1A1815 !important;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid transparent !important;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+.ea-modnav-links a:hover {
+  color: var(--ea-emerald) !important;
+}
+.ea-modnav-links a.active {
+  color: var(--ea-emerald) !important;
+  border-bottom-color: var(--ea-emerald) !important;
+  font-weight: 600;
+}
+
+/* Keep Django's built-in breadcrumbs visible but de-emphasised below the sub-nav */
+div.breadcrumbs {
+  border-bottom-color: transparent;
+  padding: 10px 40px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+}
+
+/* Links elsewhere use emerald on hover so the whole app feels connected */
+a:hover { color: var(--ea-emerald) !important; }
+.module table th a:hover { color: var(--ea-emerald); }
+#changelist tbody tr td a:hover { color: var(--ea-emerald); }
 
 /* ============================================================
    MAIN CONTENT WRAPPER

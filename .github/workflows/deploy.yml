@@ -1,0 +1,45 @@
+name: Deploy to ealedgers.com
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: SSH to production and pull latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/ealedgers/app
+            echo "--- before: $(git log -1 --pretty='%h %s' 2>/dev/null || echo 'no git yet') ---"
+            git fetch origin main
+            git reset --hard origin/main
+            chown -R ealedgers:ealedgers /opt/ealedgers/app
+            sudo -u ealedgers bash -c '
+              cd /opt/ealedgers/app
+              set -a; . /opt/ealedgers/.env; set +a
+              /opt/ealedgers/venv/bin/pip install --quiet -r requirements.txt
+              /opt/ealedgers/venv/bin/python manage.py migrate --noinput
+              /opt/ealedgers/venv/bin/python manage.py collectstatic --noinput
+            '
+            systemctl restart ealedgers.service
+            sleep 2
+            systemctl is-active ealedgers.service
+            echo "--- after: $(git log -1 --pretty='%h %s') ---"
+            curl -sI -o /dev/null -w "https://ealedgers.com/ -> %{http_code}\n" https://ealedgers.com/

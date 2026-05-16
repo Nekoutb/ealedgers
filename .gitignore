@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# EA Ledgers — .gitignore
+# Keeps secrets, virtualenvs, build artifacts, and local cruft out of git.
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+*.log
+local_settings.py
+/staticfiles/
+/media/
+
+# Environment variables / secrets
+.env
+.env.local
+.env.production
+.env.*.local
+*.pem
+*.key
+
+# Deployment artifacts that carry credentials
+deploy.py
+push_update.py
+auth_test.py
+deploy_key
+deploy_key.pub
+*.tar.gz
+
+# IDEs and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Claude Code local metadata
+.claude/
+
+# One-off reference exports (not part of the application)
+res_partner_fields.csv
+res_partner_fields.xlsx

@@ -1,0 +1,1166 @@
+Code;Account Name;Type;Allow Reconciliation
+101100;Uncalled committed capital;Equity;FAUX
+101200;Capital subscribed, called, not paid;Equity;FAUX
+101300;Capital subscribed, called, paid, unamortized;Equity;FAUX
+101400;Capital subscribed, called, paid, amortized;Equity;FAUX
+101800;Subscribed capital subject to specific conditions;Equity;FAUX
+102100;Initial endowment;Equity;FAUX
+102200;Additional allocations;Equity;FAUX
+102800;Other endowments;Equity;FAUX
+103000;Personal capital;Equity;FAUX
+104100;Temporary contributions;Equity;FAUX
+104200;Common operations;Equity;FAUX
+104300;Remuneration, taxes and other personal charges;Equity;FAUX
+104700;Self-consumption withdrawals;Equity;FAUX
+104800;Other levies;Equity;FAUX
+105100;Issuance premiums;Equity;FAUX
+105200;Contribution premiums;Equity;FAUX
+105300;Merger bonuses;Equity;FAUX
+105400;Conversion bonuses;Equity;FAUX
+105800;Other bonuses;Equity;FAUX
+106100;Legal revaluation differences;Equity;FAUX
+106200;Free revaluation differences;Equity;FAUX
+109000;Contributors, subscribed capital, uncalled;Equity;FAUX
+111000;Legal reserve;Equity;FAUX
+112000;Statutory or contractual reserves;Equity;FAUX
+113100;Long-term net capital gains reserves;Equity;FAUX
+113200;Reserves for free allocation of shares to employees and managers;Equity;FAUX
+113300;Reserves resulting from the granting of investment grants;Equity;FAUX
+113400;Reserves of securities giving access to capital;Equity;FAUX
+113800;Other regulated reserves;Equity;FAUX
+118100;Optional reservations;Equity;FAUX
+118800;Miscellaneous reserves;Equity;FAUX
+121000;Carry forward creditor;Equity;FAUX
+129100;Net loss to be carried forward;Equity;FAUX
+129200;Loss - Amortization deemed deferred;Equity;FAUX
+130100;Result pending allocation: Profit;Equity;FAUX
+130900;Result pending assignment: Loss;Equity;FAUX
+131000;Net income: profit;Equity;FAUX
+132000;Trade margin (tm);Equity;FAUX
+133000;Added value (a.v.);Equity;FAUX
+134000;Gross operating surplus (g.o.s.);Equity;FAUX
+135000;Operating income (o.i.);Equity;FAUX
+136000;Financial result (f.r.);Equity;FAUX
+137000;Income from ordinary activities (i.o.a.);Equity;FAUX
+138100;Merge result;Equity;FAUX
+138200;Result of partial asset contribution;Equity;FAUX
+138300;Split Result;Equity;FAUX
+138400;Liquidation result;Equity;FAUX
+139000;Net income: loss;Equity;FAUX
+141100;Equipment Grant: State;Equity;FAUX
+141200;Equipment Grant: Regions;Equity;FAUX
+141300;Equipment Grant: Departments;Equity;FAUX
+141400;Equipment subsidy: Municipalities and decentralized public authorities;Equity;FAUX
+141500;Equipment Grant: Public or Mixed Entities;Equity;FAUX
+141600;Equipment Grant: Private Entities and Organizations;Equity;FAUX
+141700;Equipment Grant: International Organizations;Equity;FAUX
+141800;Equipment Grant: Others;Equity;FAUX
+148000;Other investment grants;Equity;FAUX
+151000;Accelerated depreciation;Current Liabilities;FAUX
+152000;Capital gains to reinvest;Current Liabilities;FAUX
+153100;National Fund;Current Liabilities;FAUX
+153200;Levy for the Budget;Current Liabilities;FAUX
+154000;Special revaluation provision;Current Liabilities;FAUX
+155100;Reconstruction of mining and oil deposits;Current Liabilities;FAUX
+156100;Regulated provision relating to inventories: Price increase;Current Liabilities;FAUX
+156200;Regulated provision relating to stocks: Price fluctuation;Current Liabilities;FAUX
+157000;Provisions for investment;Current Liabilities;FAUX
+158000;Other regulated provisions and funds;Current Liabilities;FAUX
+161100;Ordinary bond issues;Current Liabilities;FAUX
+161200;Bonds convertible into shares;Current Liabilities;FAUX
+161300;Bonds redeemable in shares;Current Liabilities;FAUX
+161800;Other bond issues;Current Liabilities;FAUX
+162000;Loans and debts from credit institutions;Current Liabilities;FAUX
+163000;Advances received from the state;Current Liabilities;FAUX
+164000;Advances received and blocked current accounts;Current Liabilities;FAUX
+165100;Deposit and guarantees received: Deposits;Current Liabilities;FAUX
+165200;Deposit and guarantees received: Guarantees;Current Liabilities;FAUX
+166100;Accrued interest on bond issues;Current Liabilities;FAUX
+166200;Accrued interest on borrowings and debts with credit institutions;Current Liabilities;FAUX
+166300;Accrued interest on advances received from the State;Current Liabilities;FAUX
+166400;Accrued interest on advances received and blocked current accounts;Current Liabilities;FAUX
+166500;Accrued interest on deposits and guarantees received;Current Liabilities;FAUX
+166700;Accrued interest on advances subject to special conditions;Current Liabilities;FAUX
+166800;Accrued interest on other borrowings and debts;Current Liabilities;FAUX
+167100;Advances blocked for capital increase;Current Liabilities;FAUX
+167200;State Conditional Advances;Current Liabilities;FAUX
+167300;Advances conditional on other African agencies;Current Liabilities;FAUX
+167400;Advances conditional on international organizations;Current Liabilities;FAUX
+168100;Capitalized life annuities for loans and debts;Current Liabilities;FAUX
+168200;Fund notes for borrowings and debts;Current Liabilities;FAUX
+168300;Debts resulting from borrowed securities;Current Liabilities;FAUX
+168400;Equity loans;Current Liabilities;FAUX
+168500;Employee profit-sharing for loans and debts;Current Liabilities;FAUX
+168600;Loans and debts contracted with other third parties;Current Liabilities;FAUX
+172000;Rental-purchase debts / real estate credit-lease;Current Liabilities;FAUX
+173000;Rental-purchase debts / furniture credit-lease;Current Liabilities;FAUX
+174000;Lease-purchase / lease-sale debts;Current Liabilities;FAUX
+176200;Accrued interest on capital lease liabilities / real estate leasing;Current Liabilities;FAUX
+176300;Accrued interest on capital lease/equipment leasing debts;Current Liabilities;FAUX
+176400;Interest accrued on lease-purchase / hire-purchase debts;Current Liabilities;FAUX
+176800;Accrued interest on other capital lease liabilities;Current Liabilities;FAUX
+178000;Other lease-purchase debts;Current Liabilities;FAUX
+181100;Debts related to equity interests (group);Current Liabilities;FAUX
+181200;Debts related to equity interests (outside the group);Current Liabilities;FAUX
+182000;Debts related to participating companies;Current Liabilities;FAUX
+183000;Accrued interest on debts related to shareholdings;Current Liabilities;FAUX
+184000;Blocked permanent accounts of establishments and branches;Current Liabilities;FAUX
+185000;Unblocked permanent accounts of establishments and branches;Current Liabilities;FAUX
+186000;Charged liaison accounts;Current Liabilities;FAUX
+187000;Product link accounts;Current Liabilities;FAUX
+188000;Liaison accounts of participating companies;Current Liabilities;FAUX
+191000;Provisions for litigation;Current Liabilities;FAUX
+192000;Provisions for guarantees given to customers;Current Liabilities;FAUX
+193000;provisions for losses on future completion markets;Current Liabilities;FAUX
+194000;Provisions for exchange losses;Current Liabilities;FAUX
+195000;Provisions for taxes;Current Liabilities;FAUX
+196100;Provisions for pensions and similar obligations – retirement commitment;Current Liabilities;FAUX
+196200;Pension plan assets;Current Liabilities;FAUX
+197000;Provisions for restructuring;Current Liabilities;FAUX
+198100;Provisions for fines and penalties;Current Liabilities;FAUX
+198300;Self-insurer provisions;Current Liabilities;FAUX
+198400;Provisions for dismantling and restoration;Current Liabilities;FAUX
+198500;Provisions for reduction rights or benefits in kind (gift vouchers, loyalty cards, etc.);Current Liabilities;FAUX
+198800;Provisions for miscellaneous risks and charges;Current Liabilities;FAUX
+211000;Development costs;Fixed Assets;FAUX
+212100;Patents;Fixed Assets;FAUX
+212200;Licences;Fixed Assets;FAUX
+212300;Public service concessions;Fixed Assets;FAUX
+212800;Other concessions and similar rights;Fixed Assets;FAUX
+213100;Software;Fixed Assets;FAUX
+213200;Websites;Fixed Assets;FAUX
+214000;Brands;Fixed Assets;FAUX
+215000;Commercial funds;Fixed Assets;FAUX
+216000;Right to lease;Fixed Assets;FAUX
+217000;Creative investments;Fixed Assets;FAUX
+218100;Mineral resource exploration and evaluation costs;Fixed Assets;FAUX
+218200;Costs of obtaining the contract;Fixed Assets;FAUX
+218300;Customer files, notices, newspaper and magazine titles;Fixed Assets;FAUX
+218400;Franchise costs;Fixed Assets;FAUX
+218800;Various intangible rights and values;Fixed Assets;FAUX
+219100;Development costs;Fixed Assets;FAUX
+219300;Software and websites;Fixed Assets;FAUX
+219800;Other intangible rights and values;Fixed Assets;FAUX
+221100;Agricultural land;Fixed Assets;FAUX
+221200;Logging lands;Fixed Assets;FAUX
+221800;Other land;Fixed Assets;FAUX
+222100;Building plots;Fixed Assets;FAUX
+222800;Other bare land;Fixed Assets;FAUX
+223100;Built land for industrial and agricultural buildings;Fixed Assets;FAUX
+223200;Built land for administrative and commercial buildings;Fixed Assets;FAUX
+223400;Built land for buildings assigned to other professional operations;Fixed Assets;FAUX
+223500;Built land for buildings assigned to other non-professional operations;Fixed Assets;FAUX
+223800;Other built land;Fixed Assets;FAUX
+224100;Planting trees and shrubs;Fixed Assets;FAUX
+224500;Fund improvements;Fixed Assets;FAUX
+224800;Other works;Fixed Assets;FAUX
+225100;Careers;Fixed Assets;FAUX
+226100;Parkings;Fixed Assets;FAUX
+227000;Concession lands;Fixed Assets;FAUX
+228100;Land - investment properties;Fixed Assets;FAUX
+228500;Staff housing land;Fixed Assets;FAUX
+228600;Rental land - acquisition;Fixed Assets;FAUX
+228800;Divers terrains;Fixed Assets;FAUX
+229100;Various terrains;Fixed Assets;FAUX
+229200;Bare land for land development in progress;Fixed Assets;FAUX
+229500;Quarry land - subsoil for ongoing land development;Fixed Assets;FAUX
+229800;Other land for ongoing land development;Fixed Assets;FAUX
+231100;Industrial buildings;Fixed Assets;FAUX
+231200;Agricultural buildings;Fixed Assets;FAUX
+231300;Administrative and commercial buildings;Fixed Assets;FAUX
+231400;Buildings used for staff accommodation;Fixed Assets;FAUX
+231500;Buildings - investment properties;Fixed Assets;FAUX
+231600;Rental buildings - acquisition;Fixed Assets;FAUX
+232100;Industrial buildings;Fixed Assets;FAUX
+232200;Agricultural buildings;Fixed Assets;FAUX
+232300;Administrative and commercial buildings;Fixed Assets;FAUX
+232400;Buildings assigned to staff accommodation;Fixed Assets;FAUX
+232500;Buildings - investment properties;Fixed Assets;FAUX
+232600;Rental buildings - acquisition;Fixed Assets;FAUX
+233100;Overland;Fixed Assets;FAUX
+233200;Railway tracks;Fixed Assets;FAUX
+233300;Waterways;Fixed Assets;FAUX
+233400;Dams, Dykes;Fixed Assets;FAUX
+233500;Airfield runways;Fixed Assets;FAUX
+233800;Other infrastructure works;Fixed Assets;FAUX
+234100;Specialized complex installations on clean ground;Fixed Assets;FAUX
+234200;Specialized complex installations on third-party soil;Fixed Assets;FAUX
+234300;Specific installations on clean ground;Fixed Assets;FAUX
+234400;Installations of a specific nature on third-party soil;Fixed Assets;FAUX
+234500;Fixtures and fittings of buildings;Fixed Assets;FAUX
+235100;General facilities;Fixed Assets;FAUX
+235800;Other office layouts;Fixed Assets;FAUX
+237000;Industrial, agricultural and commercial buildings under concession;Fixed Assets;FAUX
+238000;Other facilities and arrangements;Fixed Assets;FAUX
+239100;Buildings in progress;Fixed Assets;FAUX
+239200;Installations in progress;Fixed Assets;FAUX
+239300;Infrastructure works in progress;Fixed Assets;FAUX
+239400;Fittings, fittings and technical installations in progress;Fixed Assets;FAUX
+239500;Office developments in progress;Fixed Assets;FAUX
+239800;Other installations and fittings in progress;Fixed Assets;FAUX
+241100;Industrial material;Fixed Assets;FAUX
+241200;Industrial tools;Fixed Assets;FAUX
+241300;Commercial material;Fixed Assets;FAUX
+241400;Commercial tools;Fixed Assets;FAUX
+241600;Industrial and commercial equipment and tools for rental – acquisition;Fixed Assets;FAUX
+242100;Agricultural material;Fixed Assets;FAUX
+242200;Agricultural tools;Fixed Assets;FAUX
+242600;Rental agricultural equipment and tools – acquisition;Fixed Assets;FAUX
+243000;Recoverable and identifiable packing material;Fixed Assets;FAUX
+244100;Office supplies;Fixed Assets;FAUX
+244200;Hardware;Fixed Assets;FAUX
+244300;Office equipment;Fixed Assets;FAUX
+244400;Office furniture;Fixed Assets;FAUX
+244500;Equipment and furniture - investment properties;Fixed Assets;FAUX
+244600;Rental equipment and furniture - acquisition;Fixed Assets;FAUX
+244700;Staff accommodation equipment and furniture;Fixed Assets;FAUX
+245100;automotive equipment;Fixed Assets;FAUX
+245200;Railway equipment;Fixed Assets;FAUX
+245300;River and lagoon equipment;Fixed Assets;FAUX
+245400;Naval equipment;Fixed Assets;FAUX
+245500;Aerial equipment;Fixed Assets;FAUX
+245600;Rental transport equipment - acquisition;Fixed Assets;FAUX
+245700;Horse-drawn equipment;Fixed Assets;FAUX
+245800;Other transport equipment;Fixed Assets;FAUX
+246100;Livestock, draft animals;Fixed Assets;FAUX
+246200;Livestock, breeding animals;Fixed Assets;FAUX
+246300;Guard animals;Fixed Assets;FAUX
+246500;Agricultural plantations;Fixed Assets;FAUX
+246800;Other biological assets;Fixed Assets;FAUX
+247100;Equipment layouts and fittings;Fixed Assets;FAUX
+247200;Arrangements and fittings of biological assets;Fixed Assets;FAUX
+247800;Other fittings, fittings of biological materials and assets;Fixed Assets;FAUX
+248100;Collections and works of art;Fixed Assets;FAUX
+248800;Various equipment and furniture;Fixed Assets;FAUX
+249100;Industrial and commercial equipment and tools;Fixed Assets;FAUX
+249200;Agricultural equipment and tools;Fixed Assets;FAUX
+249300;Recoverable and identifiable packaging material;Fixed Assets;FAUX
+249400;Office equipment and furniture;Fixed Assets;FAUX
+249500;Transportation equipment;Fixed Assets;FAUX
+249600;Biological assets;Fixed Assets;FAUX
+249700;Fixtures and fittings for equipment and biological assets;Fixed Assets;FAUX
+249800;Other biological materials and assets;Fixed Assets;FAUX
+251000;Advances and deposits paid on intangible assets;Fixed Assets;FAUX
+252000;Advances and deposits paid on property, plant and equipment;Fixed Assets;FAUX
+261000;Investments in entities under exclusive control;Fixed Assets;FAUX
+262000;Investments in jointly controlled entities;Fixed Assets;FAUX
+263000;Investments in entities with significant influence;Fixed Assets;FAUX
+265000;Shareholdings in professional bodies;Fixed Assets;FAUX
+266000;Shares in economic interest groupings (eigs);Fixed Assets;FAUX
+268000;Other equity investments;Fixed Assets;FAUX
+271100;Equity loans;Fixed Assets;FAUX
+271200;Loans to partners;Fixed Assets;FAUX
+271300;Fund Notes;Fixed Assets;FAUX
+271400;Finance lease receivables;Fixed Assets;FAUX
+271500;Securities on loan;Fixed Assets;FAUX
+271800;Other loans and receivables;Fixed Assets;FAUX
+272100;Real estate loans;Fixed Assets;FAUX
+272200;Movable and installation loans;Fixed Assets;FAUX
+272800;Other loans to staff;Fixed Assets;FAUX
+273100;Holdbacks;Fixed Assets;FAUX
+273300;Regulated Fund;Fixed Assets;FAUX
+273400;Receivables from the grantor;Fixed Assets;FAUX
+273800;Other receivables from the State;Fixed Assets;FAUX
+274100;Fixed assets of the portfolio activity (F.A.P.A.);Fixed Assets;FAUX
+274200;Equity securities;Fixed Assets;FAUX
+274300;Investment certificates;Fixed Assets;FAUX
+274400;Mutual fund units (M.F.U.);Fixed Assets;FAUX
+274500;Obligations;Fixed Assets;FAUX
+274600;Own shares or units;Fixed Assets;FAUX
+274800;Other fixed assets;Fixed Assets;FAUX
+275100;Advance Rent Deposits;Fixed Assets;FAUX
+275200;Deposits for electricity;Fixed Assets;FAUX
+275300;Deposits for water;Fixed Assets;FAUX
+275400;Deposits for gas;Fixed Assets;FAUX
+275500;Deposits for telephone, telex, fax;Fixed Assets;FAUX
+275600;Bonds on public contracts;Fixed Assets;FAUX
+275700;Guarantees on other operations;Fixed Assets;FAUX
+275800;Other deposits and guarantees;Fixed Assets;FAUX
+276100;Loans and non-trade receivables;Fixed Assets;FAUX
+276200;Loans to staff;Fixed Assets;FAUX
+276300;Receivables from the State;Fixed Assets;FAUX
+276400;Fixed assets;Fixed Assets;FAUX
+276500;Deposits and guarantees paid;Fixed Assets;FAUX
+276600;Finance lease receivables;Fixed Assets;FAUX
+276700;Receivables related to equity investments;Fixed Assets;FAUX
+276800;Miscellaneous financial assets;Fixed Assets;FAUX
+277100;Receivables from investments (group);Fixed Assets;FAUX
+277200;Receivables related to investments (non-group);Fixed Assets;FAUX
+277300;Receivables related to joint ventures;Fixed Assets;FAUX
+277400;Advances to Economic Interest Groups (E.I.G.);Fixed Assets;FAUX
+278100;Miscellaneous group receivables;Fixed Assets;FAUX
+278200;Miscellaneous non-group receivables;Fixed Assets;FAUX
+278400;Banks term deposits;Fixed Assets;FAUX
+278500;Gold and precious metals;Fixed Assets;FAUX
+278800;Other financial assets;Fixed Assets;FAUX
+281100;Amortization of development costs;Fixed Assets;FAUX
+281200;Amortization of patents, licenses, concessions and similar rights;Fixed Assets;FAUX
+281300;Amortization of software and websites;Fixed Assets;FAUX
+281400;Amortization of trademarks;Fixed Assets;FAUX
+281500;Amortization of goodwill;Fixed Assets;FAUX
+281600;Amortization of leasehold rights;Fixed Assets;FAUX
+281700;Amortization of start-up investments;Fixed Assets;FAUX
+281800;Amortization of other intangible rights and assets;Fixed Assets;FAUX
+282400;Depreciation of land reclamation work;Fixed Assets;FAUX
+283100;Depreciation of industrial, agricultural, administrative and commercial buildings on own land;Fixed Assets;FAUX
+283200;Depreciation of industrial, agricultural, administrative and commercial buildings on undeveloped land;Fixed Assets;FAUX
+283300;Depreciation of infrastructure works;Fixed Assets;FAUX
+283400;Amortization of fixtures, fittings and technical installations;Fixed Assets;FAUX
+283500;Depreciation of office fittings;Fixed Assets;FAUX
+283700;Depreciation of industrial, agricultural and commercial buildings under concession;Fixed Assets;FAUX
+283800;Depreciation of other fixtures and fittings;Fixed Assets;FAUX
+284100;Depreciation of industrial and commercial equipment and tools;Fixed Assets;FAUX
+284200;Depreciation of agricultural equipment and tools;Fixed Assets;FAUX
+284300;Depreciation of recoverable and identifiable packaging material;Fixed Assets;FAUX
+284400;Depreciation of equipment and furniture;Fixed Assets;FAUX
+284500;Depreciation of transport equipment;Fixed Assets;FAUX
+284600;Depreciation of biological assets;Fixed Assets;FAUX
+284700;Amortization of fixtures, fittings, equipment and biological assets;Fixed Assets;FAUX
+284800;Depreciation of other equipment;Fixed Assets;FAUX
+291100;Impairment of development costs;Fixed Assets;FAUX
+291200;Impairment of patents, licenses, concessions and similar rights;Fixed Assets;FAUX
+291300;Impairment of software and websites;Fixed Assets;FAUX
+291400;Impairment of brands;Fixed Assets;FAUX
+291500;Impairment of goodwill;Fixed Assets;FAUX
+291600;Impairment of leasehold rights;Fixed Assets;FAUX
+291700;Impairment of start-up investments;Fixed Assets;FAUX
+291800;Impairment of other intangible rights and assets;Fixed Assets;FAUX
+291900;Impairment of intangible assets in progress;Fixed Assets;FAUX
+292100;Depreciation of agricultural and forestry land;Fixed Assets;FAUX
+292200;Depreciation of bare land;Fixed Assets;FAUX
+292300;Impairment of built-up land;Fixed Assets;FAUX
+292400;Depreciation of land reclamation work;Fixed Assets;FAUX
+292500;Depreciation of quarry land;Fixed Assets;FAUX
+292600;Impairment of developed land;Fixed Assets;FAUX
+292700;Impairment of land under concession;Fixed Assets;FAUX
+292800;Impairment of other land;Fixed Assets;FAUX
+292900;Impairment of land in progress;Fixed Assets;FAUX
+293100;Depreciation of industrial, agricultural, administrative and commercial buildings on own land;Fixed Assets;FAUX
+293200;Depreciation of industrial, agricultural, administrative and commercial buildings on third-party land;Fixed Assets;FAUX
+293300;Impairment of infrastructure works;Fixed Assets;FAUX
+293400;Impairment of fixtures and fittings;Fixed Assets;FAUX
+293500;Impairment of office fittings;Fixed Assets;FAUX
+293700;Depreciation of industrial, agricultural and commercial buildings under concession;Fixed Assets;FAUX
+293800;Impairment of other fixtures and fittings;Fixed Assets;FAUX
+293900;Depreciation of buildings and installations in progress;Fixed Assets;FAUX
+294100;Impairment of industrial and commercial equipment and tooling;Fixed Assets;FAUX
+294200;Depreciation of agricultural machinery and equipment;Fixed Assets;FAUX
+294300;Depreciation of recoverable and identifiable packaging material;Fixed Assets;FAUX
+294400;Depreciation of equipment and furniture;Fixed Assets;FAUX
+294500;Depreciation of transport equipment;Fixed Assets;FAUX
+294600;Impairment of biological assets;Fixed Assets;FAUX
+294700;Impairment of fixtures, fittings, equipment and biological assets;Fixed Assets;FAUX
+294800;Impairment of other equipment;Fixed Assets;FAUX
+294900;Impairment of equipment in progress;Fixed Assets;FAUX
+295100;Impairment of advances paid on intangible assets;Fixed Assets;FAUX
+295200;Impairment of advances paid on property, plant and equipment;Fixed Assets;FAUX
+296100;Impairment of investments in exclusively controlled entities;Fixed Assets;FAUX
+296200;Impairment of investments in jointly controlled entities;Fixed Assets;FAUX
+296300;Impairment of investments in entities over which significant influence is exercised;Fixed Assets;FAUX
+296500;Impairment of investments in professional bodies;Fixed Assets;FAUX
+296600;Impairment of shares in EIGs;Fixed Assets;FAUX
+296800;Impairment of other investments;Fixed Assets;FAUX
+297100;Impairment of loans and receivables;Fixed Assets;FAUX
+297200;Impairment of employee loans;Fixed Assets;FAUX
+297300;Impairment of receivables from the State;Fixed Assets;FAUX
+297400;Impairment of fixed assets;Fixed Assets;FAUX
+297500;Impairment of deposits and guarantees paid;Fixed Assets;FAUX
+297700;Impairment of receivables from equity investments and advances to EIGs;Fixed Assets;FAUX
+297800;Impairment of miscellaneous financial receivables;Fixed Assets;FAUX
+311100;Material;Current Assets;FAUX
+311200;Finished outfits;Current Assets;FAUX
+312100;Goods B1;Current Assets;FAUX
+312200;Goods B2;Current Assets;FAUX
+313100;Biological assets: Animals;Current Assets;FAUX
+313200;Biological assets: Plants;Current Assets;FAUX
+318000;Goods excluding ordinary activities (e.o.a.);Current Assets;FAUX
+321000;Materials a;Current Assets;FAUX
+322000;Materials b;Current Assets;FAUX
+323000;Supplies (a,b);Current Assets;FAUX
+331000;Consumable materials;Current Assets;FAUX
+332000;Workshop and factory supplies;Current Assets;FAUX
+333000;Store supplies;Current Assets;FAUX
+334000;Office supplies;Current Assets;FAUX
+335100;Lost packaging;Current Assets;FAUX
+335200;Unidentifiable recoverable packaging;Current Assets;FAUX
+335300;Mixed use packaging;Current Assets;FAUX
+335800;Other packaging;Current Assets;FAUX
+338000;Other materials;Current Assets;FAUX
+341100;Products in progress P1;Current Assets;FAUX
+341200;Products in progress P2;Current Assets;FAUX
+342100;Work in progress T1;Current Assets;FAUX
+342200;Work in progress T2;Current Assets;FAUX
+343100;Intermediate products A;Current Assets;FAUX
+343200;Intermediate products B;Current Assets;FAUX
+344100;Residual products A;Current Assets;FAUX
+344200;Residual products B;Current Assets;FAUX
+345100;Current biological assets: Animals;Current Assets;FAUX
+345200;Current biological assets: Plants;Current Assets;FAUX
+351100;Studies in progress E1;Current Assets;FAUX
+351200;Studies in progress E2;Current Assets;FAUX
+352100;Services provided S1;Current Assets;FAUX
+352200;Services provided S2;Current Assets;FAUX
+361000;Finished products a;Current Assets;FAUX
+362000;Finished products b;Current Assets;FAUX
+363100;Finished products: Animals;Current Assets;FAUX
+363200;Finished products: Plants;Current Assets;FAUX
+363800;Other inventories (related activities);Current Assets;FAUX
+371100;Intermediate products A;Current Assets;FAUX
+371200;Intermediate products B;Current Assets;FAUX
+372100;Residual products: Waste;Current Assets;FAUX
+372200;Residual products: Scrap;Current Assets;FAUX
+372300;Residual products: Recovery materials;Current Assets;FAUX
+373100;Residual products: Animals;Current Assets;FAUX
+373200;Residual products: Plants;Current Assets;FAUX
+373800;Other inventories (related activities);Current Assets;FAUX
+381000;Goods in transit;Current Assets;FAUX
+382000;Raw materials and supplies related along the way;Current Assets;FAUX
+383000;Other supplies en route;Current Assets;FAUX
+386000;Finished products on the way;Current Assets;FAUX
+387100;Consignment stock;Current Assets;FAUX
+387200;Stock on deposit;Current Assets;FAUX
+388000;Stock from retired or scrapped assets;Current Assets;FAUX
+391000;Depreciation of inventories of goods;Current Assets;FAUX
+392000;Depreciation of raw materials and related supplies;Current Assets;FAUX
+393000;Write-downs on inventories of other goods;Current Assets;FAUX
+394000;Depreciation of work in progress;Current Assets;FAUX
+395000;Impairment of services in progress;Current Assets;FAUX
+396000;Impairment of finished goods inventory;Current Assets;FAUX
+397000;Depreciation of inventories of intermediate and residual products;Current Assets;FAUX
+398000;Depreciation of stocks in transit, on consignment or on deposit;Current Assets;FAUX
+401100;Suppliers;Payable;VRAI
+401101;Suppliers (copie);Payable;VRAI
+401200;Suppliers, Group;Payable;VRAI
+401300;Subcontractors;Payable;VRAI
+401600;Suppliers, retention of title;Payable;VRAI
+401700;Suppliers, holdbacks;Payable;VRAI
+402100;Suppliers, Notes Payable;Payable;VRAI
+402200;Suppliers - Group, Notes payable;Payable;VRAI
+402300;Subcontractors, Notes payable;Payable;VRAI
+404100;Accounts payable, intangible assets;Payable;VRAI
+404200;Accounts payable, fixed assets;Payable;VRAI
+404600;Accounts payable notes payable, intangible assets;Payable;VRAI
+404700;Accounts payable notes payable, property, plant and equipment;Payable;VRAI
+408100;Suppliers;Payable;VRAI
+408200;Suppliers - Group;Payable;VRAI
+408300;Subcontractors;Payable;VRAI
+408600;Suppliers, accrued interest;Payable;VRAI
+409100;Suppliers advances and deposits paid;Current Assets;FAUX
+409200;Suppliers - Advance payments group;Current Assets;FAUX
+409300;Suppliers and subcontractors Advances and deposits paid;Current Assets;FAUX
+409400;Suppliers receivables for packaging and materials to be returned;Current Assets;FAUX
+409800;Suppliers, discounts, rebates and other credits to be obtained;Current Assets;FAUX
+411100;Customers;Receivable;VRAI
+411200;Clients - Group;Receivable;VRAI
+411300;Clients (PoS);Receivable;VRAI
+411400;Clients, government and public authorities;Receivable;VRAI
+411500;Clients, international organizations;Receivable;VRAI
+411600;Customers, reservation of ownership;Receivable;VRAI
+411700;Customers, holdbacks;Receivable;VRAI
+411800;Customers, Value Added Tax (VAT) rebate;Receivable;VRAI
+412100;Accounts receivable, Notes receivable;Receivable;VRAI
+412200;Customers - Group, Notes receivable;Receivable;VRAI
+412400;Government and public authorities, Notes receivable;Receivable;VRAI
+412500;International Organizations, Notes Receivable;Receivable;VRAI
+413100;Customers, unpaid checks;Receivable;VRAI
+413200;Customers, Unpaid items;Receivable;VRAI
+413300;Customers, unpaid credit cards;Receivable;VRAI
+413800;Customers, other unpaid items;Receivable;VRAI
+414100;Accounts receivable, intangible assets;Receivable;VRAI
+414200;Accounts receivable, property, plant and equipment;Receivable;VRAI
+414600;Notes receivable, intangible assets;Receivable;VRAI
+414700;Notes receivable, property, plant and equipment;Receivable;VRAI
+415000;Customers, unpaid discounted bills;Receivable;VRAI
+416100;Litigated claims;Receivable;VRAI
+416200;Bad debts;Receivable;VRAI
+418100;Clients, invoices to be issued;Receivable;VRAI
+418110;Accrued Income;Receivable;VRAI
+418600;Customers, accrued interest;Receivable;VRAI
+419100;Customers, advances and deposits received;Current Liabilities;FAUX
+419200;Customers - Group, advances and deposits received;Current Liabilities;FAUX
+419400;Trade receivables, payables for packaging and returnable materials;Current Liabilities;FAUX
+419800;Customers, discounts, rebates and other credits to be granted;Current Liabilities;FAUX
+421100;Personnel, advances;Receivable;VRAI
+421200;Personnel, down payments;Receivable;VRAI
+421300;Advanced fees and supplies to staff;Receivable;VRAI
+422000;Personnel, remuneration due;Current Liabilities;FAUX
+423100;Staff, objections;Current Liabilities;FAUX
+423200;Personnel, garnishments;Current Liabilities;FAUX
+423300;Personal, third party notice;Current Liabilities;FAUX
+424100;Medical assistance;Current Liabilities;FAUX
+424200;Family allowances;Current Liabilities;FAUX
+424500;Social organizations related to the entity;Current Liabilities;FAUX
+424800;Other internal social works;Current Liabilities;FAUX
+425100;Staff representatives;Current Liabilities;FAUX
+425200;Trade Unions and Works Councils;Current Liabilities;FAUX
+425800;Other staff representatives;Current Liabilities;FAUX
+426100;Profit sharing;Current Liabilities;FAUX
+426400;Participation in the capital;Current Liabilities;FAUX
+427000;Personnel - deposits;Current Liabilities;FAUX
+428100;Accrued vacation payables;Current Liabilities;FAUX
+428600;Other accrued expenses;Current Liabilities;FAUX
+428700;Accrued income;Receivable;VRAI
+431100;Family benefits;Current Liabilities;FAUX
+431200;Workplace accidents;Current Liabilities;FAUX
+431300;Mandatory pension fund;Current Liabilities;FAUX
+431400;Optional Pension Fund;Current Liabilities;FAUX
+431800;Other social contributions;Current Liabilities;FAUX
+432000;Supplementary pension funds;Current Liabilities;FAUX
+433100;Mutual Insurance;Current Liabilities;FAUX
+433200;Retirement Insurance;Current Liabilities;FAUX
+433300;Health insurances and organizations;Current Liabilities;FAUX
+438100;Social charges on bonuses to be paid;Current Liabilities;FAUX
+438200;Social charges on leave payable;Current Liabilities;FAUX
+438600;Social charges on leave payable;Current Liabilities;FAUX
+438700;Accrued income;Receivable;VRAI
+441000;State, income tax;Current Liabilities;FAUX
+442100;State taxes and fees;Current Liabilities;FAUX
+442200;Taxes for public authorities;Current Liabilities;FAUX
+442300;Taxes recoverable from bondholders;Current Liabilities;FAUX
+442400;Taxes recoverable from associates;Current Liabilities;FAUX
+442600;Customs duties;Current Liabilities;FAUX
+442800;Other taxes;Current Liabilities;FAUX
+443100;VAT invoiced on sales;Current Liabilities;FAUX
+443200;V.A.T. invoiced on services provided;Current Liabilities;FAUX
+443300;V.A.T. charged on work;Current Liabilities;FAUX
+443400;V.A.T. charged on self-delivered production;Current Liabilities;FAUX
+443500;V.A.T. on invoices to be issued;Current Liabilities;FAUX
+444100;State, V.A.T. due;Payable;VRAI
+444500;State, V.A.T. rebate;Receivable;VRAI
+444900;State, V.A.T. credit to be carried forward;Current Assets;FAUX
+445100;Recoverable VAT on fixed assets;Current Liabilities;FAUX
+445200;V.A.T. recoverable on purchases;Current Liabilities;FAUX
+445300;V.A.T. recoverable on transport;Current Liabilities;FAUX
+445400;Recoverable VAT on external services and other expenses;Current Liabilities;FAUX
+445500;V.A.T. recoverable on invoices not received;Current Liabilities;FAUX
+445600;V.A.T. transferred by other entities;Current Liabilities;FAUX
+446000;STATE, OTHER SALES TAXES;Current Liabilities;FAUX
+447100;General Income Tax;Current Liabilities;FAUX
+447200;Payroll taxes;Current Liabilities;FAUX
+447300;National contribution;Current Liabilities;FAUX
+447400;National solidarity contribution;Current Liabilities;FAUX
+447800;Other taxes and contributions;Current Liabilities;FAUX
+448600;Accrued expenses;Current Liabilities;FAUX
+448700;Accrued income;Current Liabilities;FAUX
+449100;State, bonded bonds;Current Liabilities;FAUX
+449200;State, advances and down payments on taxes;Current Liabilities;FAUX
+449300;State, endowment receivable;Current Liabilities;FAUX
+449400;State, investment grants receivable;Current Liabilities;FAUX
+449500;State, operating grants receivable;Current Liabilities;FAUX
+449600;State, balancing grants receivable;Current Liabilities;FAUX
+449700;State, advances on grants;Current Liabilities;FAUX
+449900;State, regulated fund provisioned;Current Liabilities;FAUX
+451000;Operations with african organizations;Current Liabilities;FAUX
+452000;Operations with other international organizations;Current Liabilities;FAUX
+458100;International organizations, endowments receivable;Current Liabilities;FAUX
+458200;International organizations, grants receivable;Current Liabilities;FAUX
+461100;Contributors, contributions in kind;Current Liabilities;FAUX
+461200;Contributors, cash contributions;Current Liabilities;FAUX
+461300;Contributors, called, unpaid capital;Current Liabilities;FAUX
+461400;Contributors, contribution account, restructuring operations (merger...);Current Liabilities;FAUX
+461500;Contributors, payments received on capital increase;Current Liabilities;FAUX
+461600;Contributors, advance payments;Current Liabilities;FAUX
+461700;Defaulting contributors;Current Liabilities;FAUX
+461800;Contributors, securities to be exchanged;Current Liabilities;FAUX
+461900;Contributors, capital to be repaid;Current Liabilities;FAUX
+462100;Partners, current accounts: Principal;Current Liabilities;FAUX
+462600;Partners, current accounts: Accrued interest;Current Liabilities;FAUX
+463100;Partners, joint operations and management: Current operations;Current Liabilities;FAUX
+463600;Partners, joint ventures and joint management: Accrued interest;Current Liabilities;FAUX
+465000;Associates, dividends to be paid;Current Liabilities;FAUX
+466000;Group, current accounts;Current Liabilities;FAUX
+467000;Outstanding contributions on called capital;Current Liabilities;FAUX
+469000;Entity, dividends receivable;Current Liabilities;FAUX
+471100;Miscellaneous debtors;Current Liabilities;FAUX
+471101;Débiteurs divers Avance loyer local Deido;Current Liabilities;FAUX
+471200;Miscellaneous creditors;Current Liabilities;FAUX
+471300;Debtors and other creditors: Bonds;Current Liabilities;FAUX
+471500;Remuneration of non-member directors;Current Liabilities;FAUX
+471600;Factoring and securitization account;Current Liabilities;FAUX
+471700;Miscellaneous receivables - holdbacks;Current Liabilities;FAUX
+471800;Contribution, merger account and similar transactions;Current Liabilities;FAUX
+471900;Stock and bond warrants;Current Liabilities;FAUX
+472100;Receivables from sales of investment securities;Current Liabilities;FAUX
+472600;Outstanding payments on unreleased investment securities;Current Liabilities;FAUX
+473100;Intermediaries, transactions on behalf of third parties: Principals;Current Liabilities;FAUX
+473200;Intermediaries, transactions on behalf of third parties: Agents;Current Liabilities;FAUX
+473300;Intermediaries, transactions on behalf of third parties: Principals;Current Liabilities;FAUX
+473400;Intermediaries, transactions on behalf of third parties: Commission agents;Current Liabilities;FAUX
+473900;State, local authorities, global allocation fund;Current Liabilities;FAUX
+474600;Periodic expense allocation account;Current Liabilities;FAUX
+474700;Periodic Revenue Allocation Account;Current Liabilities;FAUX
+475100;Transitional account, special adjustment: Asset account;Equity;FAUX
+475200;Transitional account, special adjustment: Liability account;Equity;FAUX
+476000;Prepaid expenses;Current Assets;FAUX
+477000;Deferred income;Current Liabilities;FAUX
+478110;Decrease in operating receivables;Current Assets;FAUX
+478180;Decrease in HAO receivables;Current Assets;FAUX
+478200;Decrease in financial receivables;Current Assets;FAUX
+478310;Increase in operating liabilities;Current Assets;FAUX
+478380;Increase in HAO debts;Current Assets;FAUX
+478400;Increase in financial liabilities;Current Assets;FAUX
+478600;Valuation differences on cash instruments;Current Assets;FAUX
+478800;Differences offset by currency hedging;Current Assets;FAUX
+479110;Increase in operating receivables;Current Liabilities;FAUX
+479180;Increase in HAO receivables;Current Liabilities;FAUX
+479200;Increase in financial receivables;Current Liabilities;FAUX
+479310;Decrease in operating liabilities;Current Liabilities;FAUX
+479380;Decrease in HAO debts;Current Liabilities;FAUX
+479400;Decrease in financial liabilities;Current Liabilities;FAUX
+479700;Valuation differences on cash instruments;Current Liabilities;FAUX
+479800;Differences offset by currency hedging;Current Liabilities;FAUX
+481100;Intangible assets;Current Liabilities;FAUX
+481200;Tangible assets;Current Liabilities;FAUX
+481300;Outstanding payments on equity securities and non-vested securities;Current Liabilities;FAUX
+481610;Reservation of ownership - intangible assets;Current Liabilities;FAUX
+481620;Reservation of ownership - property, plant and equipment;Current Liabilities;FAUX
+481710;Holdbacks - intangible assets;Current Liabilities;FAUX
+481720;Holdbacks - tangible capital assets;Current Liabilities;FAUX
+481810;Unpaid invoices - intangible assets;Current Liabilities;FAUX
+481820;Unpaid invoices - property, plant and equipment;Current Liabilities;FAUX
+482100;Intangible assets;Current Liabilities;FAUX
+482200;Tangible assets;Current Liabilities;FAUX
+484000;Other liabilities not related to ordinary activities (o.a.s.);Current Liabilities;FAUX
+485100;In account, intangible assets;Receivable;VRAI
+485200;In account, tangible assets;Receivable;VRAI
+485300;Notes receivable, intangible assets;Receivable;VRAI
+485400;Notes receivable, tangible assets;Receivable;VRAI
+485500;Discounted bills not yet due;Receivable;VRAI
+485600;Financial assets;Receivable;VRAI
+485700;Holdbacks;Receivable;VRAI
+485800;Invoices to be issued;Receivable;VRAI
+488000;Other receivables not related to ordinary activities (o.a.s.);Receivable;VRAI
+490000;Depreciation of accounts payable;Current Assets;FAUX
+491100;Litigated claims;Current Assets;FAUX
+491200;Doubtful debts;Current Assets;FAUX
+492000;Depreciation of personal accounts;Current Assets;FAUX
+493000;Depreciation of social security accounts;Current Assets;FAUX
+494000;Depreciation of state and local authority accounts;Current Assets;FAUX
+495000;Depreciation of international organizations accounts;Current Assets;FAUX
+496200;Associates, current accounts;Current Assets;FAUX
+496300;Partners, joint operations and EIG;Current Assets;FAUX
+496600;Group, current accounts;Current Assets;FAUX
+497000;Depreciation of miscellaneous accounts receivable;Current Assets;FAUX
+498500;Receivables on disposal of fixed assets;Current Assets;FAUX
+498600;Receivables from sales of investment securities;Current Assets;FAUX
+498800;Other receivables O.A.S.;Current Assets;FAUX
+499100;Provisions for short-term risks on operating activities;Current Assets;FAUX
+499700;Provisions for short-term risks on financial operations;Current Assets;FAUX
+499800;Provisions for short-term risks on O.A.S. operations;Current Assets;FAUX
+501100;Short-term Treasury securities;Current Assets;FAUX
+501200;Securities of financial institutions;Current Assets;FAUX
+501300;Short-term cash bonds;Current Assets;FAUX
+501600;Acquisition costs of treasury securities and bills of exchange;Current Assets;FAUX
+502100;Own shares or units;Current Assets;FAUX
+502200;Listed shares;Current Assets;FAUX
+502300;Unlisted shares;Current Assets;FAUX
+502400;"Stripped shares (investment certificates; voting rights)";Current Assets;FAUX
+502500;Other actions;Current Assets;FAUX
+502600;Share acquisition costs;Current Assets;FAUX
+503100;Bonds issued by the entity and redeemed by it;Current Assets;FAUX
+503200;Listed bonds;Current Assets;FAUX
+503300;Unlisted bonds;Current Assets;FAUX
+503500;Other obligations;Current Assets;FAUX
+503600;Bond Acquisition Costs;Current Assets;FAUX
+504200;Share subscription warrants;Current Assets;FAUX
+504300;Bond warrants;Current Assets;FAUX
+505000;Marketable securities outside the region;Current Assets;FAUX
+506100;Treasury securities and short-term bills;Current Assets;FAUX
+506200;Actions;Current Assets;FAUX
+506300;Obligations;Current Assets;FAUX
+508000;Other investment securities and similar receivables;Current Assets;FAUX
+510000;Bank and Cash;Bank and Cash;FAUX
+521001;Bank (ECOBANK);Bank and Cash;FAUX
+521002;Bank Suspense Account;Current Assets;FAUX
+521003;Outstanding Receipts;Current Assets;VRAI
+521004;Outstanding Payments;Current Assets;VRAI
+521005;Bank (copy);Bank and Cash;FAUX
+521006;Banque (ECOBANK 1) (copie);Bank and Cash;FAUX
+531000;Postal cheques;Current Assets;FAUX
+532000;Treasury;Current Assets;FAUX
+533000;Management and intermediation companies (m.i.c.);Current Assets;FAUX
+536000;Financial institutions, accrued interest;Current Assets;FAUX
+538000;Other financial bodies;Current Assets;FAUX
+541000;Interest rate options;Current Assets;FAUX
+542000;Exchange rate options;Current Assets;FAUX
+543000;Stock rate options;Current Assets;FAUX
+544000;Forward market instruments;Current Assets;FAUX
+545000;Gold and other precious metals holdings;Current Assets;FAUX
+551000;Electronic money - fuel card;Current Assets;FAUX
+552000;Electronic money - cell phone;Current Assets;FAUX
+553000;Electronic money - peage card;Current Assets;FAUX
+554000;Electronic purse;Current Assets;FAUX
+558000;Other electronic money instruments;Current Assets;FAUX
+561000;Cash credits;Current Assets;FAUX
+564000;Discounting of campaign credits;Current Assets;FAUX
+565000;Discounting of campaign credits;Current Assets;FAUX
+566000;Banks, cash credits, accrued interest;Current Assets;FAUX
+571001;Cash (Momo) 682998387 (copy);Bank and Cash;FAUX
+571002;Cash KISSYWEARS SARL;Bank and Cash;FAUX
+571003;Cash BENIN;Bank and Cash;FAUX
+571110;Cash in national currency OM;Bank and Cash;FAUX
+571120;Cash in national currency MOMO;Bank and Cash;FAUX
+571130;Cash in national currency WAVE;Bank and Cash;FAUX
+571140;Cash in national currency MOOVE;Bank and Cash;FAUX
+571141;PETTY CASH;Bank and Cash;FAUX
+571200;Cash in foreign currencies;Current Assets;FAUX
+572100;Branch Fund A in national currency;Current Assets;FAUX
+572200;Foreign Currency Branch A;Current Assets;FAUX
+573100;Branch office B in national currency;Current Assets;FAUX
+573200;Branch cashier B in foreign currency;Current Assets;FAUX
+581000;Imprest accounts;Current Assets;FAUX
+582000;Accreditives;Current Assets;FAUX
+585000;Fund transfers;Current Assets;FAUX
+585001;Liquidity Transfer;Current Assets;VRAI
+590000;Impairment of investment securities;Current Assets;FAUX
+591000;Impairment of securities and receivables;Current Assets;FAUX
+592000;Impairment of bank accounts;Current Assets;FAUX
+593000;Impairment of financial institutions and similar accounts;Current Assets;FAUX
+594000;Impairment of cash instrument accounts;Current Assets;FAUX
+599000;Provisions for short-term financial risks;Current Assets;FAUX
+601100;Purchases of goods in the Region;Cost of Revenue;FAUX
+601200;Purchases of goods outside the region;Cost of Revenue;FAUX
+601300;Purchases of goods from Group entities in the Region;Cost of Revenue;FAUX
+601400;Purchases of goods from Group entities outside the Region;Cost of Revenue;FAUX
+601500;Purchase of goods expenses on purchases;Cost of Revenue;FAUX
+601900;Discounts and rebates obtained (not broken down);Expenses;FAUX
+602100;Purchases of raw materials and related supplies in the Region;Cost of Revenue;FAUX
+602200;Purchases of raw materials and related supplies outside the Region;Cost of Revenue;FAUX
+602300;Purchases of raw materials and supplies related to group entities in the Region;Cost of Revenue;FAUX
+602400;Purchases of raw materials and supplies related to group entities outside the Region;Cost of Revenue;FAUX
+602500;Purchases of raw materials and related supplies expenses on purchases;Cost of Revenue;FAUX
+602900;Rebates, Rebates and Rebates obtained (not broken down);Expenses;FAUX
+603100;Changes in merchandise stocks;Cost of Revenue;FAUX
+603200;Changes in inventories of raw materials and related supplies;Cost of Revenue;FAUX
+603300;Changes in stocks of other supplies;Cost of Revenue;FAUX
+604100;Consumables;Cost of Revenue;FAUX
+604200;Combustible materials;Expenses;FAUX
+604300;Care products;Expenses;FAUX
+604400;Workshop and factory supplies;Expenses;FAUX
+604500;Fees on purchases;Expenses;FAUX
+604600;Store supplies;Expenses;FAUX
+604700;Office supplies;Expenses;FAUX
+604900;Rebates, Rebates and Rebates obtained (not broken down);Expenses;FAUX
+605100;Non-storable supplies -Water;Expenses;FAUX
+605200;Non-storable supplies - Electricity;Expenses;FAUX
+605300;Non-storable supplies – Other energies;Expenses;FAUX
+605400;Non-storable maintenance supplies;Expenses;FAUX
+605500;Non-storable office supplies;Expenses;FAUX
+605600;Purchases of small equipment and tools;Expenses;FAUX
+605700;Purchases of studies and provision of services;Cost of Revenue;FAUX
+605800;Purchases of works, materials and equipment;Expenses;FAUX
+605900;Rebates, Rebates and Rebates obtained (not broken down);Expenses;FAUX
+608100;One-way packaging;Expenses;FAUX
+608200;Unidentifiable returnable packaging;Expenses;FAUX
+608300;Mixed-use packaging;Expenses;FAUX
+608500;Purchase fees;Expenses;FAUX
+608900;Rebates, Rebates and Rebates obtained (not broken down);Expenses;FAUX
+612000;Transport on sales;Cost of Revenue;FAUX
+613000;Transport for third parties;Cost of Revenue;FAUX
+614000;Staff transport;Cost of Revenue;FAUX
+616000;Ply transport;Cost of Revenue;FAUX
+618100;Travel and trips;Cost of Revenue;FAUX
+618200;Transport between establishments or worksites;Cost of Revenue;FAUX
+618300;Administrative transport;Cost of Revenue;FAUX
+621000;General subcontracting;Cost of Revenue;FAUX
+622100;Land rentals;Cost of Revenue;FAUX
+622200;Building rentals;Cost of Revenue;FAUX
+622300;Rental of equipment and tools;Cost of Revenue;FAUX
+622400;Malus on packaging;Cost of Revenue;FAUX
+622500;Packaging rentals;Cost of Revenue;FAUX
+622600;Rents and land rents;Cost of Revenue;FAUX
+622800;Miscellaneous rentals and rental charges;Expenses;FAUX
+623200;Real estate leasing;Cost of Revenue;FAUX
+623300;Furniture leasing;Cost of Revenue;FAUX
+623400;Rent sale;Cost of Revenue;FAUX
+623800;Other capital leases;Cost of Revenue;FAUX
+624100;Property maintenance and repairs;Cost of Revenue;FAUX
+624200;Maintenance and repairs of movable property;Cost of Revenue;FAUX
+624300;Maintenance;Cost of Revenue;FAUX
+624400;Dismantling and restoration costs;Cost of Revenue;FAUX
+624800;Other maintenance and repairs;Cost of Revenue;FAUX
+625100;Multi-risk insurance;Cost of Revenue;FAUX
+625200;Transport equipment insurance;Cost of Revenue;FAUX
+625300;Operating risk insurance;Cost of Revenue;FAUX
+625400;Producer liability insurance;Cost of Revenue;FAUX
+625500;Customer insolvency insurance;Cost of Revenue;FAUX
+625700;Transport insurance on sales;Cost of Revenue;FAUX
+625800;Other insurance premiums;Cost of Revenue;FAUX
+626100;Studies and research;Cost of Revenue;FAUX
+626500;General documentation;Cost of Revenue;FAUX
+626600;Technical documentation;Cost of Revenue;FAUX
+627100;Ads, inserts;Cost of Revenue;FAUX
+627200;Catalogs, printed advertising;Cost of Revenue;FAUX
+627300;Samples;Cost of Revenue;FAUX
+627400;Fairs and exhibitions;Cost of Revenue;FAUX
+627500;Publications;Cost of Revenue;FAUX
+627600;Gifts to customers;Cost of Revenue;FAUX
+627700;Costs of symposia, seminars, conferences;Cost of Revenue;FAUX
+627800;Other advertising and public relations expenses;Cost of Revenue;FAUX
+628100;Telephone charges;Cost of Revenue;FAUX
+628200;Telex charges;Cost of Revenue;FAUX
+628300;Fax charges;Cost of Revenue;FAUX
+628800;Other telecommunications costs;Cost of Revenue;FAUX
+631100;Fees on securities (sale, custody);Expenses;FAUX
+631200;Bill of exchange fees;Expenses;FAUX
+631300;Rental of safes;Expenses;FAUX
+631400;Factoring and securitization commissions;Expenses;FAUX
+631500;Credit card fees;Expenses;FAUX
+631600;Loan issue costs;Expenses;FAUX
+631700;Fees on electronic money instruments;Expenses;FAUX
+631800;Other bank charges;Expenses;FAUX
+632200;Commissions and brokerage on sales;Expenses;FAUX
+632400;Fees for regulated professions;Expenses;FAUX
+632500;Legal and litigation costs;Expenses;FAUX
+632600;Factoring and securitization fees;Expenses;FAUX
+632700;Remuneration of other service providers;Expenses;FAUX
+632800;Miscellaneous fees;Expenses;FAUX
+633000;Staff training costs;Expenses;FAUX
+634200;Royalties for patents, licenses;Expenses;FAUX
+634300;Software royalties;Expenses;FAUX
+634400;Trademark royalties;Expenses;FAUX
+634500;Royalties for websites;Expenses;FAUX
+634600;Royalties for concessions, rights and similar values;Expenses;FAUX
+635100;Contributions;Expenses;FAUX
+635800;Various competitions;Expenses;FAUX
+637100;Temporary staff;Expenses;FAUX
+637200;Staff seconded or loaned to the entity;Expenses;FAUX
+638100;Staff recruitment costs;Expenses;FAUX
+638200;Moving expenses;Expenses;FAUX
+638300;Receptions;Expenses;FAUX
+638400;Tasks;Expenses;FAUX
+638500;Condominium fees;Expenses;FAUX
+638800;Miscellaneous external loads;Expenses;FAUX
+641100;Property taxes and related taxes;Expenses;FAUX
+641200;Patents, licenses and related taxes;Expenses;FAUX
+641300;Taxes on salaries and wages;Expenses;FAUX
+641400;Apprenticeship taxes;Expenses;FAUX
+641500;Professional formation continues;Expenses;FAUX
+641800;Other direct taxes and duties;Expenses;FAUX
+645000;Indirect taxes and taxes;Expenses;FAUX
+646100;Transfer taxes;Expenses;FAUX
+646200;Stamp duties;Expenses;FAUX
+646300;Taxes on company vehicles;Expenses;FAUX
+646400;Thumbnails;Expenses;FAUX
+646800;Other registration fees;Expenses;FAUX
+647100;Base penalties, direct taxes;Expenses;FAUX
+647200;Base penalties, indirect taxes;Expenses;FAUX
+647300;Recovery penalties, direct taxes;Expenses;FAUX
+647400;Recovery penalties, indirect taxes;Expenses;FAUX
+647800;Other tax penalties and fines;Expenses;FAUX
+648000;Other taxes and duties;Expenses;FAUX
+651100;Customer;Expenses;FAUX
+651110;Other Expenses;Expenses;FAUX
+651500;Other debtors;Expenses;FAUX
+652100;Transferred share of profits (manager's accounting);Expenses;FAUX
+652500;Losses imputed by transfer (accounting of non-managing partners);Expenses;FAUX
+654100;Intangible assets;Expenses;FAUX
+654200;Tangible assets;Expenses;FAUX
+656000;Exchange loss on trade receivables and debts;Expenses;FAUX
+657000;Penalties and criminal fines;Expenses;FAUX
+658100;Service allowances and other directors' compensation;Expenses;FAUX
+658200;Donations;Expenses;FAUX
+658300;Patronage;Expenses;FAUX
+658800;Other miscellaneous charges;Expenses;FAUX
+659100;Impairment charges and provisions for short-term risks;Expenses;FAUX
+659300;Charges for depreciation and provisions for short-term risks on inventories;Expenses;FAUX
+659400;Impairment charges and provisions for short-term risks on receivables;Expenses;FAUX
+659800;Other charges for impairment and provisions for short-term risks;Expenses;FAUX
+661100;Salaries and commissions;Expenses;FAUX
+661200;Bonuses and gratuities;Expenses;FAUX
+661300;Paid vacation;Expenses;FAUX
+661400;Compensation for notice, dismissal and search for employment;Expenses;FAUX
+661500;Sickness benefits paid to workers;Expenses;FAUX
+661600;Family supplement;Expenses;FAUX
+661700;Benefits in kind;Expenses;FAUX
+661800;Other direct compensation;Expenses;FAUX
+662100;Salaries and commissions;Expenses;FAUX
+662200;Bonuses and gratuities;Expenses;FAUX
+662300;Paid vacation;Expenses;FAUX
+662400;Compensation for notice, dismissal and search for employment;Expenses;FAUX
+662500;Sickness benefits paid to workers;Expenses;FAUX
+662600;Family supplement;Expenses;FAUX
+662700;Benefits in kind;Expenses;FAUX
+662800;Other direct compensation;Expenses;FAUX
+663100;Housing allowances;Expenses;FAUX
+663200;Representation allowances;Expenses;FAUX
+663300;Expatriation allowances;Expenses;FAUX
+663400;Transportation allowances;Expenses;FAUX
+663800;Other allowances and miscellaneous benefits;Expenses;FAUX
+664100;Social charges on the remuneration of national staff;Expenses;FAUX
+664200;Social charges on remuneration of non-national staff;Expenses;FAUX
+666100;Remuneration for the operator's work;Expenses;FAUX
+666200;Social charges;Expenses;FAUX
+667100;Temporary staff;Expenses;FAUX
+667200;Staff seconded or loaned to the entity;Expenses;FAUX
+668100;Payments to trade unions and works and establishment committees;Expenses;FAUX
+668200;Payments to health and safety committees;Expenses;FAUX
+668300;Payments and contributions to other social works;Expenses;FAUX
+668400;Occupational medicine and pharmacy;Expenses;FAUX
+668500;Insurance and health organizations;Expenses;FAUX
+668600;Retirement insurance and pension funds;Expenses;FAUX
+668700;Increases and social penalties;Expenses;FAUX
+668800;Miscellaneous social charges;Expenses;FAUX
+671100;Bond issues;Expenses;FAUX
+671200;Loans from credit institutions;Expenses;FAUX
+671300;Debts linked to shareholdings;Expenses;FAUX
+671400;Bond redemption premiums;Expenses;FAUX
+672200;Interest in rents from capital purchases/property leasing;Expenses;FAUX
+672300;Interest in rents from capital leases/equipment leasing;Expenses;FAUX
+672400;Interest in rent-to-own/hire-purchase;Expenses;FAUX
+672800;Interest in rents from other capital leases;Expenses;FAUX
+673000;Discounts granted;Expenses;FAUX
+674100;Advances received and deposits payable;Expenses;FAUX
+674200;Blocked current accounts;Expenses;FAUX
+674300;Interest on guaranteed bonds;Expenses;FAUX
+674400;Interest on commercial debts;Expenses;FAUX
+674500;Bank and financing interest (discount, etc.);Expenses;FAUX
+674800;Interest on miscellaneous debts;Expenses;FAUX
+675000;Discounts from commercial bills;Expenses;FAUX
+676000;Financial exchange losses;Expenses;FAUX
+677100;Losses on sale of investment securities;Expenses;FAUX
+677200;Losses from the free allocation of shares to salaried staff and managers;Expenses;FAUX
+678100;Losses and charges on life annuities;Expenses;FAUX
+678200;Losses and charges on financial transactions;Expenses;FAUX
+678400;Losses and charges on cash instruments;Expenses;FAUX
+679100;Charge for depreciation and provisions for financial risks;Expenses;FAUX
+679500;Charge for depreciation and provisions on investment securities;Expenses;FAUX
+679800;Other charges for impairment and provisions for short-term financial risks;Expenses;FAUX
+681200;Amortization of intangible assets;Other Expenses;FAUX
+681300;Depreciation of property, plant and equipment;Other Expenses;FAUX
+691100;Allocations to provisions for risks and charges;Expenses;FAUX
+691300;Depreciation of intangible fixed assets;Expenses;FAUX
+691400;Depreciation of property, plant and equipment;Expenses;FAUX
+697100;Allocations to provisions for risks and charges;Expenses;FAUX
+697200;Depreciation of financial fixed assets;Expenses;FAUX
+701100;Sale of goods in the Country (KW Douala);Income;FAUX
+701101;Sale of goods in the COTONOU;Income;FAUX
+701102;Sale of goods in the LOME;Income;FAUX
+701103;Sale of goods in the CAPSULE STORE;Income;FAUX
+701104;Sale of goods in the SASSYCHIC BOUTIQUE;Income;FAUX
+701105;Sale of goods in the ADD STORE;Income;FAUX
+701106;Sale of goods in the CASSABLANCA;Income;FAUX
+701107;Sale of goods in the KINSHASA;Income;FAUX
+701108;Sale of goods in the POINTE NOIRE;Income;FAUX
+701200;Sale of goods outside the Region;Income;FAUX
+701201;Sale of goods outside the Region;Income;FAUX
+701202;Sale of goods outside the Region;Income;FAUX
+701300;Sale of goods to group entities in the Region;Income;FAUX
+701400;Sale of goods to group entities outside the Region;Income;FAUX
+701500;Sale of goods on the internet;Income;FAUX
+701900;Rebates, rebates, rebates granted (not broken down) on the sale of goods;Income;FAUX
+702100;Sales of finished products in the Region;Income;FAUX
+702200;Sales of finished products outside the Region;Income;FAUX
+702300;Sales of finished products to group entities in the Region;Income;FAUX
+702400;Sales of finished products to group entities outside the Region;Income;FAUX
+702500;Online sales of finished products;Income;FAUX
+702900;Rebates, rebates, rebates granted (not broken down) on sales of finished products;Income;FAUX
+703100;Sales of intermediate products in the Region;Income;FAUX
+703200;Sales of intermediate products outside the Region;Income;FAUX
+703300;Sales of intermediate products to group entities in the Region;Income;FAUX
+703400;Sales of intermediate products to group entities outside the Region;Income;FAUX
+703500;Sales of intermediate products on the internet;Income;FAUX
+703900;Rebates, rebates, rebates granted (not broken down) on Sales of intermediate products;Income;FAUX
+704100;Sales of residual products in the Region;Income;FAUX
+704200;Sales of residual products outside the Region;Income;FAUX
+704300;Sales of residual products to group entities in the Region;Income;FAUX
+704400;Sales of residual products to group entities outside the Region;Income;FAUX
+704500;Sales of residual products on the internet;Income;FAUX
+704900;Rebates, rebates, rebates granted (not broken down) on sales of residual products;Income;FAUX
+705100;Works invoiced in the Region;Income;FAUX
+705200;Work invoiced outside the Region;Income;FAUX
+705300;Work invoiced to group entities in the Region;Income;FAUX
+705400;Work invoiced to group entities outside the Region;Income;FAUX
+705500;Work billed online;Income;FAUX
+705900;Rebates, rebates, rebates granted (not broken down) on invoiced work;Income;FAUX
+706100;Services sold in the Region;Income;FAUX
+706200;Services sold outside the Region;Income;FAUX
+706300;Services sold to group entities in the Region;Income;FAUX
+706400;Services sold to group entities outside the Region;Income;FAUX
+706500;Services sold on the internet;Income;FAUX
+706900;Rebates, rebates, rebates granted (not broken down) on services sold;Income;FAUX
+707100;Postage, lost packaging and other fees charged;Income;FAUX
+707200;Commissions and brokerage;Income;FAUX
+707300;Rentals and rental fees - financing;Income;FAUX
+707400;Bonuses on takeovers and disposals of packaging;Income;FAUX
+707500;Provision of staff;Income;FAUX
+707600;Royalties for patents, software, trademarks and similar rights;Income;FAUX
+707700;Services operated in the interest of staff;Income;FAUX
+707800;Other accessory products;Income;FAUX
+711000;On export products;Income;FAUX
+712000;On imported products;Income;FAUX
+713000;On equalization products;Income;FAUX
+714000;Indemnities and operating subsidies (agricultural entity);Income;FAUX
+718100;Paid by the State and public authorities;Income;FAUX
+718200;Paid by international organizations;Income;FAUX
+718300;Paid by third parties;Income;FAUX
+721000;Intangible assets;Income;FAUX
+722100;Tangible assets (excluding biological assets);Income;FAUX
+722200;Tangible assets (biological assets);Income;FAUX
+724000;Self-consumed production;Income;FAUX
+726000;Financial assets;Income;FAUX
+734100;Changes in stocks of products in progress;Income;FAUX
+734200;Changes in work in progress inventories;Income;FAUX
+735100;Changes in work in progress: Studies in progress;Income;FAUX
+735200;Changes in services in progress: Services in progress;Income;FAUX
+736000;Changes in stocks of finished products;Income;FAUX
+737100;Changes in inventories of intermediate products;Income;FAUX
+737200;Changes in inventory of residual products;Income;FAUX
+751000;Profits on trade receivables and other debtors;Income;FAUX
+752100;Transferred share of losses (manager's accounting);Income;FAUX
+752500;Profits allocated by transfer (accounting of non-managing partners);Income;FAUX
+754100;Intangible assets;Income;FAUX
+754200;Fixed assets;Income;FAUX
+756000;Exchange gains on trade receivables and debts;Income;FAUX
+758100;Service allowances and other directors' compensation;Income;FAUX
+758200;Insurance compensation received;Income;FAUX
+758800;Other miscellaneous products;Income;FAUX
+759100;Reversal of charges for depreciation and provisions for short-term risks;Income;FAUX
+759300;Recovery of charges for depreciation and provisions on inventories;Income;FAUX
+759400;Recovery of charges for depreciation and provisions on receivables;Income;FAUX
+759800;Reversal of charges for depreciation and provisions for other charges for depreciation and provisions for short-term operating risks;Income;FAUX
+771200;Loan interest;Income;FAUX
+771300;Interest on miscellaneous receivables;Income;FAUX
+772100;Income from equity securities;Income;FAUX
+772200;Income from other fixed securities;Income;FAUX
+773000;Discounts obtained;Income;FAUX
+774500;Bond income;Income;FAUX
+774600;Income from investment securities;Income;FAUX
+775000;Interest in finance lease rents;Income;FAUX
+776000;Financial exchange gains;Income;FAUX
+777000;Gains on disposals of marketable securities;Income;FAUX
+778100;Earnings on life annuities;Income;FAUX
+778200;Gains on financial operations;Income;FAUX
+778400;Gains on cash instruments;Income;FAUX
+779100;Reversals of charges for depreciations and short-term provisions on financial risks;Income;FAUX
+779500;Reversals of charges for depreciations and short-term provisions on investment securities;Income;FAUX
+779800;Reversals of expenses for depreciations and short-term provisions on other expenses for depreciations and provisions for short-term financial risks;Income;FAUX
+781000;Transfers of operating expenses;Income;FAUX
+787000;Transfers of financial expenses;Income;FAUX
+791100;Reversals of provisions and operating depreciations for risks and charges;Income;FAUX
+791300;Reversals of provisions and operating depreciation of intangible assets;Income;FAUX
+791400;Reversals of provisions and operating depreciation of tangible assets;Income;FAUX
+797100;Reversals of provisions and financial depreciations for risks and charges;Income;FAUX
+797200;Reversals of provisions and financial depreciation of financial fixed assets;Income;FAUX
+798000;Reversals of amortization;Income;FAUX
+799000;Reprises de subventions d’investissement;Income;FAUX
+811000;Intangible assets;Expenses;FAUX
+812000;Tangible assets;Expenses;FAUX
+816000;Financial assets;Expenses;FAUX
+821000;Intangible assets;Income;FAUX
+822000;Tangible assets;Income;FAUX
+826000;Financial assets;Income;FAUX
+831000;O.A.S. recognized;Expenses;FAUX
+833000;Expenses related to restructuring operations;Expenses;FAUX
+834000;Losses on o.a.s. receivables;Expenses;FAUX
+835000;Donations and freedom granted;Expenses;FAUX
+836000;Waiver of receivables agreed;Expenses;FAUX
+837000;Expenses related to liquidation operations;Expenses;FAUX
+839000;Expenses for depreciations and provisions for short-term risks o.a.s.;Expenses;FAUX
+841000;O.A.S products observed;Income;FAUX
+843000;Income related to restructuring operations;Income;FAUX
+844000;Indemnities and subsidies h.a.o. (agricultural entity);Income;FAUX
+845000;Donations and liberalities obtained;Income;FAUX
+846000;Waiver of debts obtained;Income;FAUX
+847000;Income related to liquidation transactions;Income;FAUX
+848000;Transfers of o.a.s expenses;Income;FAUX
+849000;Reversal of expenses for depreciations and provisions for short-term risks o.a.s.;Income;FAUX
+851000;Allocations to regulated provisions;Expenses;FAUX
+852000;Depreciation and amortization o.a.s.;Expenses;FAUX
+853000;Impairment allowances o.a.s.;Expenses;FAUX
+854000;Allocations to provisions for risks and charges o.a.s.;Expenses;FAUX
+858000;Other awards o.a.s.;Expenses;FAUX
+861000;Reversals of regulated provisionsreversals of regulated provisions;Income;FAUX
+862000;Reversals of o.a.s amortization;Income;FAUX
+863000;Reversals of impairment o.a.s.;Income;FAUX
+864000;Recovery of provisions for o.a.s. risks and charges;Income;FAUX
+868000;Other o.a.s.;Income;FAUX
+871000;Legal profit sharing;Expenses;FAUX
+874000;Contractual profit sharing;Expenses;FAUX
+878000;Other participations;Expenses;FAUX
+881000;State;Income;FAUX
+884000;Public collectivities;Income;FAUX
+886000;Group;Income;FAUX
+888000;Others;Income;FAUX
+891100;Activities carried out in the State;Expenses;FAUX
+891200;Activities carried out in the other States of the Region;Expenses;FAUX
+891300;Activities carried out outside the Region;Expenses;FAUX
+892000;Tax reminder on previous results;Expenses;FAUX
+895000;Minimum fixed tax (m.f.t.);Expenses;FAUX
+899100;Reductions;Expenses;FAUX
+899400;Cancellations for retroactive losses;Expenses;FAUX
+901100;Confirmed credits earned;Off-Balance Sheet;FAUX
+901200;Loans still to be collected;Off-Balance Sheet;FAUX
+901300;Revolving financing facilities;Off-Balance Sheet;FAUX
+901400;Issuance facilities;Off-Balance Sheet;FAUX
+901800;Other financing commitments obtained;Off-Balance Sheet;FAUX
+902100;Endorsements obtained;Off-Balance Sheet;FAUX
+902200;Deposits, guarantees obtained;Off-Balance Sheet;FAUX
+902300;Mortgages obtained;Off-Balance Sheet;FAUX
+902400;Items endorsed by third parties;Off-Balance Sheet;FAUX
+902800;Other guarantees obtained;Off-Balance Sheet;FAUX
+903100;Forward commodity purchases;Off-Balance Sheet;FAUX
+903200;Currency forward purchases;Off-Balance Sheet;FAUX
+903300;Firm customer orders;Off-Balance Sheet;FAUX
+903800;Other reciprocal commitments;Off-Balance Sheet;FAUX
+904100;Conditional debt waivers;Off-Balance Sheet;FAUX
+904300;Sales with retention of title clause;Off-Balance Sheet;FAUX
+904800;Various commitments obtained;Off-Balance Sheet;FAUX
+905100;Loans granted but not disbursed;Off-Balance Sheet;FAUX
+905800;Other financing commitments granted;Off-Balance Sheet;FAUX
+906100;Endorsements granted;Off-Balance Sheet;FAUX
+906200;Deposits, guarantees granted;Off-Balance Sheet;FAUX
+906300;Mortgages granted;Off-Balance Sheet;FAUX
+906400;Items endorsed by the entity;Off-Balance Sheet;FAUX
+906800;Other guarantees granted;Off-Balance Sheet;FAUX
+907100;Forward Commodity Sales;Off-Balance Sheet;FAUX
+907200;Currency forward sales;Off-Balance Sheet;FAUX
+907300;Firm orders to suppliers;Off-Balance Sheet;FAUX
+907800;Other reciprocal commitments;Off-Balance Sheet;FAUX
+908100;Conditional debt cancellations;Off-Balance Sheet;FAUX
+908200;Retirement commitments;Off-Balance Sheet;FAUX
+908300;Purchases with retention of title clause;Off-Balance Sheet;FAUX
+908800;Various commitments granted;Off-Balance Sheet;FAUX
+911100;Counterparties - Confirmed credits obtained;Off-Balance Sheet;FAUX
+911200;Counterparties - Loans still to be collected;Off-Balance Sheet;FAUX
+911300;Counterparties - Revolving financing facilities;Off-Balance Sheet;FAUX
+911400;Counterparties - Issuance facilities;Off-Balance Sheet;FAUX
+911800;Counterparties - Other financing commitments obtained;Off-Balance Sheet;FAUX
+912100;Counterparts - Endorsements obtained;Off-Balance Sheet;FAUX
+912200;Counterparties - Sureties, guarantees obtained;Off-Balance Sheet;FAUX
+912300;Considerations - Mortgages obtained;Off-Balance Sheet;FAUX
+912400;Counterparties - Items endorsed by third parties;Off-Balance Sheet;FAUX
+912800;Counterparties - Other guarantees obtained;Off-Balance Sheet;FAUX
+913100;Counterparties - Forward Commodity Purchases;Off-Balance Sheet;FAUX
+913200;Counterparties - Forward currency purchases;Off-Balance Sheet;FAUX
+913300;Counterparties - Firm customer orders;Off-Balance Sheet;FAUX
+913800;Considerations - Other reciprocal commitments;Off-Balance Sheet;FAUX
+914100;Counterparties - Conditional debt waivers;Off-Balance Sheet;FAUX
+914300;Considerations - Sales with retention of title clause;Off-Balance Sheet;FAUX
+914800;Considerations - Various commitments obtained;Off-Balance Sheet;FAUX
+915100;Counterparties - Loans granted but not disbursed;Off-Balance Sheet;FAUX
+915800;Counterparties - Other financing commitments granted;Off-Balance Sheet;FAUX
+916100;Considerations - Guarantees granted;Off-Balance Sheet;FAUX
+916200;Counterparties - Sureties, guarantees granted;Off-Balance Sheet;FAUX
+916300;Considerations - Mortgages granted;Off-Balance Sheet;FAUX
+916400;Considerations - Items endorsed by the entity;Off-Balance Sheet;FAUX
+916800;Counterparties - Other guarantees granted;Off-Balance Sheet;FAUX
+917100;Counterparties - Forward Commodity Sales;Off-Balance Sheet;FAUX
+917200;Counterparties - Forward currency sales;Off-Balance Sheet;FAUX
+917300;Considerations - Firm orders to suppliers;Off-Balance Sheet;FAUX
+917800;Considerations - Other reciprocal commitments;Off-Balance Sheet;FAUX
+918100;Counterparties - Conditional debt cancellations;Off-Balance Sheet;FAUX
+918200;Counterparties - Retirement commitments;Off-Balance Sheet;FAUX
+918300;Counterparties - Purchases with retention of title clause;Off-Balance Sheet;FAUX
+918800;Considerations - Various commitments granted;Off-Balance Sheet;FAUX
+920000;Reflective accounts;Off-Balance Sheet;FAUX
+930000;Reclassification accounts;Off-Balance Sheet;FAUX
+940000;Cost accounts;Off-Balance Sheet;FAUX
+950000;Stock accounts;Off-Balance Sheet;FAUX
+960000;Pre-drawn costs variance accounts;Off-Balance Sheet;FAUX
+970000;Accounting difference accounts;Off-Balance Sheet;FAUX
+980000;Income statements;Off-Balance Sheet;FAUX
+990000;Internal link accounts;Off-Balance Sheet;FAUX
+999001;Cash Difference Gain;Other Income;FAUX
+999002;Cash Difference Loss;Expenses;FAUX
+999999;Undistributed Profits/Losses;Current Year Earnings;FAUX

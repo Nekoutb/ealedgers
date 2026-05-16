@@ -1,0 +1,44 @@
+{% comment %}
+Shared Odoo-style top-nav for both the custom Accounting pages (extending
+_app_base.html) and the Django admin (extending admin/base_site.html).
+NAV comes from accounting.context_processors.accounting_nav.
+{% endcomment %}
+<nav class="ea-nav" aria-label="Accounting sections">
+  <a href="/workspace/" class="ea-nav-back" title="Back to module launcher">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+    Modules
+  </a>
+
+  <div class="ea-nav-items">
+    {% for menu in NAV %}
+      {% if menu.url %}
+        <a href="{{ menu.url }}" class="ea-nav-item{% if menu.active %} active{% endif %}">{{ menu.label }}</a>
+      {% else %}
+        <div class="ea-nav-dd">
+          <button type="button" class="ea-nav-item{% if menu.active %} active{% endif %}" aria-haspopup="true">
+            {{ menu.label }}<span class="ea-nav-caret">▾</span>
+          </button>
+          <div class="ea-nav-menu" role="menu">
+            {% for group in menu.groups %}
+              <div class="ea-nav-group">
+                {% if group.title %}<div class="ea-nav-group-title">{{ group.title }}</div>{% endif %}
+                {% for item in group.items %}
+                  {% if item.url %}
+                    <a href="{{ item.url }}" class="ea-nav-link{% if item.active %} active{% endif %}" role="menuitem">{{ item.label }}</a>
+                  {% else %}
+                    <span class="ea-nav-link soon" aria-disabled="true" role="menuitem" title="Coming soon">{{ item.label }}<span class="ea-soon-pill">Soon</span></span>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</nav>

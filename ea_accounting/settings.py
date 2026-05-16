@@ -110,10 +110,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Authentication flow ---------------------------------------------------
 
-# Unauthenticated users hitting /admin/ are bounced to the landing page (which
-# IS the login form). After successful login, they go to the admin.
+# Unauthenticated users hitting protected pages are bounced to the landing
+# page (which IS the login form). After successful login they go to the
+# workspace (module launcher), and from there into individual modules.
 LOGIN_URL = '/'
-LOGIN_REDIRECT_URL = '/admin/'
+LOGIN_REDIRECT_URL = '/workspace/'
 LOGOUT_REDIRECT_URL = '/'
 
 

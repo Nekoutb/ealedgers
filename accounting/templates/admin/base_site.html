@@ -21,43 +21,7 @@
 {% block nav-global %}{% endblock %}
 
 {% block breadcrumbs %}
-<nav class="ea-modnav" aria-label="Accounting sections">
-  <a href="/workspace/" class="ea-back" title="Back to module launcher">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1"/>
-      <rect x="14" y="3" width="7" height="7" rx="1"/>
-      <rect x="3" y="14" width="7" height="7" rx="1"/>
-      <rect x="14" y="14" width="7" height="7" rx="1"/>
-    </svg>
-    Modules
-  </a>
-  <div class="ea-modnav-links">
-    <a href="/accounting/">Dashboard</a>
-    <div class="ea-dd">
-      <button type="button" class="ea-dd-toggle">Settings <span class="ea-caret">▾</span></button>
-      <div class="ea-dd-menu">
-        <a href="/admin/accounting/account/" class="{% if '/accounting/account/' in request.path %}active{% endif %}">Chart of Accounts</a>
-        <a href="/admin/accounting/journal/" class="{% if '/accounting/journal/' in request.path %}active{% endif %}">Journals</a>
-        <a href="/admin/accounting/currency/" class="{% if '/accounting/currency/' in request.path %}active{% endif %}">Currencies</a>
-        <a href="/admin/accounting/company/" class="{% if '/accounting/company/' in request.path %}active{% endif %}">Companies</a>
-      </div>
-    </div>
-    <a href="/admin/accounting/partner/?partner_type__in=customer,both" class="{% if '/accounting/partner/' in request.path %}active{% endif %}">Customers</a>
-    <a href="/admin/accounting/partner/?partner_type__in=vendor,both">Suppliers</a>
-    <a href="/admin/accounting/fixedasset/" class="{% if 'fixedasset' in request.path or 'depreciationline' in request.path %}active{% endif %}">Fixed Assets</a>
-    <div class="ea-dd">
-      <button type="button" class="ea-dd-toggle">Reports <span class="ea-caret">▾</span></button>
-      <div class="ea-dd-menu">
-        <a href="/accounting/reports/trial-balance/">Trial Balance</a>
-        <a href="/accounting/reports/general-ledger/">General Ledger</a>
-        <a href="/accounting/reports/customer-aging/">Customer Aging</a>
-        <a href="/accounting/reports/supplier-aging/">Supplier Aging</a>
-        <a href="/accounting/reports/fixed-assets-register/">Fixed Assets Register</a>
-      </div>
-    </div>
-    <a href="/admin/accounting/journalentry/" class="{% if '/accounting/journalentry/' in request.path %}active{% endif %}">Journal Entries</a>
-  </div>
-</nav>
+{% include "accounting/_nav.html" %}
 {% endblock %}
 
 {% block extrahead %}
@@ -67,6 +31,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%23000'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+
+{% include "accounting/_nav_styles.html" %}
 
 <style>
 /* ============================================================

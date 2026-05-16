@@ -109,80 +109,7 @@ a:hover { color: var(--emerald); }
 }
 .logout:hover { background: var(--header-fg); color: var(--header-bg); }
 
-/* ============ MODULE SUB-NAV ============ */
-.modnav {
-  background: var(--surface);
-  border-bottom: 1px solid var(--hairline);
-  padding: 0 32px;
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  position: relative;
-  z-index: 4;
-}
-.modnav .back {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 14px 18px 14px 0;
-  margin-right: 16px;
-  color: var(--muted);
-  font-size: 11px; letter-spacing: 0.20em; text-transform: uppercase; font-weight: 600;
-  border-right: 1px solid var(--hairline);
-}
-.modnav .back:hover { color: var(--emerald); }
-.modnav .back svg { flex: none; opacity: 0.85; }
-
-.modnav .links { display: flex; align-items: stretch; gap: 0; }
-.modnav .link {
-  padding: 16px 18px;
-  color: var(--ink);
-  font-size: 12px; font-weight: 500; letter-spacing: 0.05em;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-  background: none; border-left: none; border-right: none; border-top: none;
-  cursor: pointer; font-family: var(--font-sans);
-  display: inline-flex; align-items: center; gap: 5px;
-  white-space: nowrap;
-}
-.modnav .link:hover, .modnav .link[aria-expanded="true"] { color: var(--emerald); }
-.modnav .link.active {
-  color: var(--emerald);
-  border-bottom-color: var(--emerald);
-  font-weight: 600;
-}
-.modnav .caret {
-  font-size: 8px; opacity: 0.6;
-  display: inline-block; transform: translateY(1px);
-}
-
-/* Dropdown */
-.modnav .dropdown { position: relative; }
-.modnav .dropdown-menu {
-  display: none;
-  position: absolute; top: 100%; left: 0;
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  min-width: 220px;
-  padding: 6px 0;
-  box-shadow: 0 14px 28px -10px rgba(26, 24, 21, 0.18);
-  z-index: 10;
-}
-.modnav .dropdown:hover .dropdown-menu,
-.modnav .dropdown:focus-within .dropdown-menu { display: block; }
-.modnav .dropdown-menu a {
-  display: block;
-  padding: 10px 18px;
-  color: var(--ink);
-  font-size: 13px; font-weight: 400;
-  letter-spacing: 0.01em;
-}
-.modnav .dropdown-menu a:hover {
-  background: var(--emerald-soft);
-  color: var(--emerald);
-}
-.modnav .dropdown-menu a.active {
-  color: var(--emerald);
-  font-weight: 600;
-}
+/* Nav CSS is loaded from accounting/_nav_styles.html as a separate <style> block */
 
 /* ============ MAIN STAGE ============ */
 .stage {
@@ -323,7 +250,7 @@ a:hover { color: var(--emerald); }
 /* ============ RESPONSIVE ============ */
 @media (max-width: 900px) {
   .topbar { padding: 12px 16px; flex-wrap: wrap; gap: 10px; }
-  .modnav { padding: 0 16px; overflow-x: auto; }
+  .ea-nav { padding: 0 16px; }
   .stage { padding: 28px 16px 64px; }
   .page-head { flex-direction: column; align-items: flex-start; }
   .page-head .meta { text-align: left; }
@@ -342,6 +269,7 @@ a:hover { color: var(--emerald); }
 
 {% block extra_css %}{% endblock %}
 </style>
+{% include "accounting/_nav_styles.html" %}
 </head>
 <body>
 
@@ -365,48 +293,7 @@ a:hover { color: var(--emerald); }
   </div>
 </header>
 
-<nav class="modnav" aria-label="Accounting sections">
-  <a href="/workspace/" class="back" title="Back to module launcher">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1"/>
-      <rect x="14" y="3" width="7" height="7" rx="1"/>
-      <rect x="3" y="14" width="7" height="7" rx="1"/>
-      <rect x="14" y="14" width="7" height="7" rx="1"/>
-    </svg>
-    Modules
-  </a>
-
-  <div class="links">
-    <a href="/accounting/" class="link {% if active_nav == 'dashboard' %}active{% endif %}">Dashboard</a>
-
-    <div class="dropdown">
-      <button class="link" type="button" aria-haspopup="true">Settings <span class="caret">▾</span></button>
-      <div class="dropdown-menu">
-        <a href="/admin/accounting/account/">Chart of Accounts</a>
-        <a href="/admin/accounting/journal/">Journals</a>
-        <a href="/admin/accounting/currency/">Currencies</a>
-        <a href="/admin/accounting/company/">Companies</a>
-      </div>
-    </div>
-
-    <a href="/admin/accounting/partner/?partner_type__in=customer,both" class="link">Customers</a>
-    <a href="/admin/accounting/partner/?partner_type__in=vendor,both" class="link">Suppliers</a>
-    <a href="/admin/accounting/fixedasset/" class="link {% if active_nav == 'fixed_assets' %}active{% endif %}">Fixed Assets</a>
-
-    <div class="dropdown">
-      <button class="link" type="button" aria-haspopup="true">Reports <span class="caret">▾</span></button>
-      <div class="dropdown-menu">
-        <a href="/accounting/reports/trial-balance/" class="{% if active_nav == 'trial_balance' %}active{% endif %}">Trial Balance</a>
-        <a href="/accounting/reports/general-ledger/" class="{% if active_nav == 'general_ledger' %}active{% endif %}">General Ledger</a>
-        <a href="/accounting/reports/customer-aging/" class="{% if active_nav == 'customer_aging' %}active{% endif %}">Customer Aging</a>
-        <a href="/accounting/reports/supplier-aging/" class="{% if active_nav == 'supplier_aging' %}active{% endif %}">Supplier Aging</a>
-        <a href="/accounting/reports/fixed-assets-register/" class="{% if active_nav == 'fixed_assets_register' %}active{% endif %}">Fixed Assets Register</a>
-      </div>
-    </div>
-
-    <a href="/admin/accounting/journalentry/" class="link">Journal Entries</a>
-  </div>
-</nav>
+{% include "accounting/_nav.html" %}
 
 <main class="stage">
 {% block content %}{% endblock %}

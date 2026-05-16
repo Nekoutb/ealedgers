@@ -1,0 +1,160 @@
+{% comment %}
+Shared CSS for the Odoo-style top-nav. Lives in a partial so both
+_app_base.html and admin/base_site.html can include it without duplicating
+hundreds of lines of selectors.
+
+Colours and font tokens are referenced from CSS custom properties that each
+host base defines (--ink, --muted, --hairline, --emerald, etc.).
+{% endcomment %}
+<style>
+.ea-nav {
+  background: var(--surface, #fff);
+  border-bottom: 1px solid var(--hairline, #e2dcd0);
+  padding: 0 32px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+  z-index: 50;
+  font-family: var(--font-sans, 'Public Sans', system-ui, sans-serif);
+  overflow: visible;
+}
+
+/* "Back to Modules" pill on the far left */
+.ea-nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 14px 0;
+  margin-right: 18px;
+  color: var(--muted, #6e6862) !important;
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  font-weight: 600;
+  text-decoration: none !important;
+  border-right: 1px solid var(--hairline, #e2dcd0);
+  border-bottom: none !important;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.ea-nav-back:hover { color: var(--emerald, #0b6e4f) !important; }
+.ea-nav-back svg { flex: none; opacity: 0.85; }
+
+.ea-nav-items {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* Each top-level item (whether direct link or dropdown trigger) */
+.ea-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 16px;
+  color: var(--ink, #1a1815) !important;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-decoration: none !important;
+  border: 0;
+  border-bottom: 2px solid transparent !important;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ea-nav-item:hover,
+.ea-nav-dd:hover .ea-nav-item,
+.ea-nav-dd:focus-within .ea-nav-item {
+  color: var(--emerald, #0b6e4f) !important;
+}
+.ea-nav-item.active {
+  color: var(--emerald, #0b6e4f) !important;
+  border-bottom-color: var(--emerald, #0b6e4f) !important;
+  font-weight: 600;
+}
+.ea-nav-caret {
+  font-size: 8px;
+  opacity: 0.6;
+  display: inline-block;
+  transform: translateY(1px);
+}
+
+/* Dropdown panel */
+.ea-nav-dd { position: relative; }
+.ea-nav-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--surface, #fff);
+  border: 1px solid var(--hairline, #e2dcd0);
+  min-width: 260px;
+  padding: 8px 0;
+  box-shadow: 0 14px 30px -10px rgba(26, 24, 21, 0.18);
+  z-index: 200;
+}
+.ea-nav-dd:hover .ea-nav-menu,
+.ea-nav-dd:focus-within .ea-nav-menu { display: block; }
+
+.ea-nav-group + .ea-nav-group {
+  border-top: 1px solid var(--hairline, #e2dcd0);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+.ea-nav-group-title {
+  padding: 6px 18px 4px;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted, #6e6862);
+  font-weight: 700;
+}
+
+.ea-nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 18px;
+  color: var(--ink, #1a1815) !important;
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none !important;
+  border-bottom: none !important;
+  transition: background 0.15s, color 0.15s;
+}
+.ea-nav-link:hover {
+  background: var(--emerald-soft, #e1efe8);
+  color: var(--emerald, #0b6e4f) !important;
+}
+.ea-nav-link.active {
+  color: var(--emerald, #0b6e4f) !important;
+  font-weight: 600;
+}
+
+/* "Soon" disabled items */
+.ea-nav-link.soon {
+  color: var(--muted, #6e6862) !important;
+  cursor: not-allowed;
+}
+.ea-nav-link.soon:hover {
+  background: transparent;
+}
+.ea-soon-pill {
+  display: inline-block;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  background: var(--hairline, #e2dcd0);
+  color: var(--muted, #6e6862);
+  padding: 2px 6px;
+  border-radius: 100px;
+}
+</style>

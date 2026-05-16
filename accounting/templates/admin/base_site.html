@@ -21,7 +21,7 @@
 {% block nav-global %}{% endblock %}
 
 {% block breadcrumbs %}
-<nav class="ea-modnav" aria-label="Accounting module sections">
+<nav class="ea-modnav" aria-label="Accounting sections">
   <a href="/workspace/" class="ea-back" title="Back to module launcher">
     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="3" width="7" height="7" rx="1"/>
@@ -32,12 +32,30 @@
     Modules
   </a>
   <div class="ea-modnav-links">
-    <a href="/admin/" class="{% if request.path == '/admin/' %}active{% endif %}">Dashboard</a>
-    <a href="/admin/accounting/journalentry/" class="{% if 'journalentry' in request.path %}active{% endif %}">Journal Entries</a>
-    <a href="/admin/accounting/account/" class="{% if '/accounting/account/' in request.path %}active{% endif %}">Chart of Accounts</a>
-    <a href="/admin/accounting/partner/" class="{% if '/accounting/partner/' in request.path %}active{% endif %}">Partners</a>
+    <a href="/accounting/">Dashboard</a>
+    <div class="ea-dd">
+      <button type="button" class="ea-dd-toggle">Settings <span class="ea-caret">▾</span></button>
+      <div class="ea-dd-menu">
+        <a href="/admin/accounting/account/" class="{% if '/accounting/account/' in request.path %}active{% endif %}">Chart of Accounts</a>
+        <a href="/admin/accounting/journal/" class="{% if '/accounting/journal/' in request.path %}active{% endif %}">Journals</a>
+        <a href="/admin/accounting/currency/" class="{% if '/accounting/currency/' in request.path %}active{% endif %}">Currencies</a>
+        <a href="/admin/accounting/company/" class="{% if '/accounting/company/' in request.path %}active{% endif %}">Companies</a>
+      </div>
+    </div>
+    <a href="/admin/accounting/partner/?partner_type__in=customer,both" class="{% if '/accounting/partner/' in request.path %}active{% endif %}">Customers</a>
+    <a href="/admin/accounting/partner/?partner_type__in=vendor,both">Suppliers</a>
     <a href="/admin/accounting/fixedasset/" class="{% if 'fixedasset' in request.path or 'depreciationline' in request.path %}active{% endif %}">Fixed Assets</a>
-    <a href="/admin/accounting/journal/" class="{% if '/accounting/journal/' in request.path or '/accounting/currency/' in request.path or '/accounting/company/' in request.path %}active{% endif %}">Configuration</a>
+    <div class="ea-dd">
+      <button type="button" class="ea-dd-toggle">Reports <span class="ea-caret">▾</span></button>
+      <div class="ea-dd-menu">
+        <a href="/accounting/reports/trial-balance/">Trial Balance</a>
+        <a href="/accounting/reports/general-ledger/">General Ledger</a>
+        <a href="/accounting/reports/customer-aging/">Customer Aging</a>
+        <a href="/accounting/reports/supplier-aging/">Supplier Aging</a>
+        <a href="/accounting/reports/fixed-assets-register/">Fixed Assets Register</a>
+      </div>
+    </div>
+    <a href="/admin/accounting/journalentry/" class="{% if '/accounting/journalentry/' in request.path %}active{% endif %}">Journal Entries</a>
   </div>
 </nav>
 {% endblock %}
@@ -307,6 +325,36 @@ div.breadcrumbs a:hover { border-bottom-color: #000; }
   border-bottom-color: var(--ea-emerald) !important;
   font-weight: 600;
 }
+
+/* Dropdowns inside the sub-nav */
+.ea-dd { position: relative; }
+.ea-dd-toggle {
+  background: none; border: none; color: #1A1815;
+  font-family: 'Public Sans', sans-serif; font-size: 12px; font-weight: 500;
+  letter-spacing: 0.05em; padding: 16px 18px;
+  cursor: pointer; border-bottom: 2px solid transparent;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: color 0.15s;
+}
+.ea-dd-toggle:hover, .ea-dd:hover .ea-dd-toggle, .ea-dd:focus-within .ea-dd-toggle {
+  color: var(--ea-emerald);
+}
+.ea-caret { font-size: 8px; opacity: 0.6; }
+.ea-dd-menu {
+  display: none; position: absolute; top: 100%; left: 0;
+  background: #FFFFFF; border: 1px solid #E2DCD0;
+  min-width: 220px; padding: 6px 0;
+  box-shadow: 0 14px 28px -10px rgba(26, 24, 21, 0.18);
+  z-index: 100;
+}
+.ea-dd:hover .ea-dd-menu, .ea-dd:focus-within .ea-dd-menu { display: block; }
+.ea-dd-menu a {
+  display: block; padding: 10px 18px;
+  color: #1A1815 !important; font-size: 13px; font-weight: 400;
+  text-decoration: none !important; border-bottom: none !important;
+}
+.ea-dd-menu a:hover { background: #E1EFE8; color: var(--ea-emerald) !important; }
+.ea-dd-menu a.active { color: var(--ea-emerald) !important; font-weight: 600; }
 
 /* Keep Django's built-in breadcrumbs visible but de-emphasised below the sub-nav */
 div.breadcrumbs {

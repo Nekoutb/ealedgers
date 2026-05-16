@@ -2,14 +2,13 @@
 
 from django.contrib import admin
 from django.contrib.auth.views import LoginView
-from django.urls import path
+from django.urls import include, path
 
 from accounting.views import workspace
 
 
 urlpatterns = [
-    # Public landing page also serves as the login form. Authenticated users
-    # are auto-bounced to LOGIN_REDIRECT_URL (the workspace).
+    # Landing / login form
     path(
         '',
         LoginView.as_view(
@@ -18,8 +17,10 @@ urlpatterns = [
         ),
         name='landing',
     ),
-    # Post-login module launcher (Odoo-style apps grid).
+    # Post-login module launcher
     path('workspace/', workspace, name='workspace'),
-    # Django admin (currently houses the Accounting module's CRUD UI).
+    # The Accounting module (custom views — dashboard + reports)
+    path('accounting/', include('accounting.urls', namespace='accounting')),
+    # Django admin houses the CRUD UIs that the module nav links into
     path('admin/', admin.site.urls),
 ]

@@ -1,0 +1,57 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}Trial Balance{% endblock %}
+
+{% block content %}
+{% with active_nav="trial_balance" %}{% endwith %}
+
+<section class="page-head">
+  <div>
+    <div class="eyebrow">Reports · Trial Balance</div>
+    <h1>Trial <em>Balance.</em></h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>{% if balanced %}<span style="color: var(--emerald);">BALANCED ✓</span>{% else %}<span style="color: var(--terracotta);">OUT OF BALANCE</span>{% endif %}</div>
+  </div>
+</section>
+
+{% if rows %}
+<table class="dt">
+  <thead>
+    <tr>
+      <th style="width: 90px;">Code</th>
+      <th>Account</th>
+      <th>Type</th>
+      <th class="num">Debit</th>
+      <th class="num">Credit</th>
+      <th class="num">Balance</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono"><strong>{{ r.code }}</strong></td>
+      <td>{{ r.name }}</td>
+      <td><span class="pill">{{ r.type }}</span></td>
+      <td class="num">{{ r.debit|floatformat:0|intcomma }}</td>
+      <td class="num">{{ r.credit|floatformat:0|intcomma }}</td>
+      <td class="num {% if r.balance < 0 %}neg{% elif r.balance > 0 %}pos{% endif %}">{{ r.balance|floatformat:0|intcomma }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="3">Totals · XAF</td>
+      <td class="num">{{ total_debit|floatformat:0|intcomma }}</td>
+      <td class="num">{{ total_credit|floatformat:0|intcomma }}</td>
+      <td class="num">{% if balanced %}—{% else %}{{ total_debit|floatformat:0|intcomma }}{% endif %}</td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<div class="empty">No posted entries yet.<br>Post your first journal entry to populate the trial balance.</div>
+{% endif %}
+
+{% endblock %}

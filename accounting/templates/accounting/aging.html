@@ -1,0 +1,62 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block content %}
+{% if partner_kind == "Customer" %}{% with active_nav="customer_aging" %}{% endwith %}{% else %}{% with active_nav="supplier_aging" %}{% endwith %}{% endif %}
+
+<section class="page-head">
+  <div>
+    <div class="eyebrow">Reports · {{ title }}</div>
+    <h1>{{ partner_kind }} <em>Aging.</em></h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>Buckets: 0–30 / 31–60 / 61–90 / 91–180 / over 180</div>
+  </div>
+</section>
+
+{% if rows %}
+<table class="dt">
+  <thead>
+    <tr>
+      <th>{{ partner_kind }}</th>
+      <th class="num">Current</th>
+      <th class="num">31–60</th>
+      <th class="num">61–90</th>
+      <th class="num">91–180</th>
+      <th class="num">&gt; 180</th>
+      <th class="num">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.partner.name }}</td>
+      <td class="num">{{ r.current|floatformat:0|intcomma }}</td>
+      <td class="num">{{ r.b30|floatformat:0|intcomma }}</td>
+      <td class="num">{{ r.b60|floatformat:0|intcomma }}</td>
+      <td class="num">{{ r.b90|floatformat:0|intcomma }}</td>
+      <td class="num {% if r.over > 0 %}neg{% endif %}">{{ r.over|floatformat:0|intcomma }}</td>
+      <td class="num"><strong>{{ r.total|floatformat:0|intcomma }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td>Totals · XAF</td>
+      <td class="num">{{ totals.current|floatformat:0|intcomma }}</td>
+      <td class="num">{{ totals.b30|floatformat:0|intcomma }}</td>
+      <td class="num">{{ totals.b60|floatformat:0|intcomma }}</td>
+      <td class="num">{{ totals.b90|floatformat:0|intcomma }}</td>
+      <td class="num">{{ totals.over|floatformat:0|intcomma }}</td>
+      <td class="num"></td>
+    </tr>
+  </tfoot>
+</table>
+{% else %}
+<div class="empty">No open {{ partner_kind|lower }} balances right now.</div>
+{% endif %}
+
+{% endblock %}

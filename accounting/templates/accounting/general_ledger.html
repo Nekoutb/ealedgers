@@ -1,0 +1,53 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}General Ledger{% endblock %}
+
+{% block content %}
+{% with active_nav="general_ledger" %}{% endwith %}
+
+<section class="page-head">
+  <div>
+    <div class="eyebrow">Reports · General Ledger</div>
+    <h1>General <em>Ledger.</em></h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>{{ lines|length }} of latest posted lines</div>
+  </div>
+</section>
+
+{% if lines %}
+<table class="dt">
+  <thead>
+    <tr>
+      <th style="width: 100px;">Date</th>
+      <th style="width: 120px;">Entry</th>
+      <th style="width: 80px;">Journal</th>
+      <th>Account</th>
+      <th>Partner</th>
+      <th>Memo</th>
+      <th class="num">Debit</th>
+      <th class="num">Credit</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in lines %}
+    <tr>
+      <td class="mono">{{ l.entry.date|date:"Y-m-d" }}</td>
+      <td><a href="/admin/accounting/journalentry/{{ l.entry.id }}/change/" class="mono">{{ l.entry.name|default:"(draft)" }}</a></td>
+      <td><span class="pill">{{ l.entry.journal.code }}</span></td>
+      <td class="mono">{{ l.account.code }} — {{ l.account.name|truncatechars:40 }}</td>
+      <td>{% if l.partner %}{{ l.partner.name|truncatechars:30 }}{% else %}<span style="color: var(--muted);">—</span>{% endif %}</td>
+      <td style="color: var(--muted);">{{ l.name|default:""|truncatechars:40 }}</td>
+      <td class="num">{% if l.debit %}{{ l.debit|floatformat:0|intcomma }}{% endif %}</td>
+      <td class="num">{% if l.credit %}{{ l.credit|floatformat:0|intcomma }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">No posted entries yet.</div>
+{% endif %}
+
+{% endblock %}

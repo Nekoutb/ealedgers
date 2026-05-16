@@ -1,11 +1,26 @@
+"""Views for the accounting app — both the workspace launcher and the
+in-module pages (dashboard, reports). All views are login-required."""
+
+from datetime import date, timedelta
+from decimal import Decimal
+
 from django.contrib.auth.decorators import login_required
+from django.db.models import Sum, Q, F
 from django.shortcuts import render
+
+from .models import (
+    Account,
+    DepreciationLine,
+    FixedAsset,
+    Journal,
+    JournalEntry,
+    JournalEntryLine,
+    Partner,
+)
 
 
 # ---------------------------------------------------------------------------
-# Module icons — each is a complete inline SVG. Designed by hand to feel
-# distinctive (not stock icon-set generic): a saturated coloured tile with
-# a white symbol that reads at a glance.
+# Module icons (used by the workspace launcher only)
 # ---------------------------------------------------------------------------
 
 ICON_ACCOUNTING = """
@@ -107,49 +122,250 @@ ICON_SETTINGS = """
 
 
 # ---------------------------------------------------------------------------
-# Module manifest
-# Order produces a 3x3 grid; Accounting (only live) sits in the centre cell.
+# Module manifest for the workspace launcher
 # ---------------------------------------------------------------------------
 
 MODULES = [
-    # Row 1
-    {"slug": "missions",     "name": "Mission Orders",  "tagline": "Ordres de mission",
-     "url": None,     "status": "soon", "icon": ICON_MISSIONS},
-    {"slug": "timesheets",   "name": "Time Tracking",   "tagline": "Hours on engagements",
-     "url": None,     "status": "soon", "icon": ICON_TIME},
-    {"slug": "purchasing",   "name": "Purchase Orders", "tagline": "Procurement",
-     "url": None,     "status": "soon", "icon": ICON_PURCHASE},
-
-    # Row 2 — Accounting in the centre
-    {"slug": "engagements",  "name": "Engagements",     "tagline": "Client projects",
-     "url": None,     "status": "soon", "icon": ICON_ENGAGEMENTS},
-    {"slug": "accounting",   "name": "Accounting",      "tagline": "General ledger",
-     "url": "/admin/", "status": "live", "icon": ICON_ACCOUNTING},
-    {"slug": "billing",      "name": "Billing",         "tagline": "Customer invoices",
-     "url": None,     "status": "soon", "icon": ICON_BILLING},
-
-    # Row 3
-    {"slug": "hr",           "name": "People",          "tagline": "Employees & grades",
-     "url": None,     "status": "soon", "icon": ICON_PEOPLE},
-    {"slug": "reports",      "name": "Reports",         "tagline": "Analytics",
-     "url": None,     "status": "soon", "icon": ICON_REPORTS},
-    {"slug": "settings",     "name": "Settings",        "tagline": "Configuration",
-     "url": None,     "status": "soon", "icon": ICON_SETTINGS},
+    {"slug": "missions",    "name": "Mission Orders",  "tagline": "Ordres de mission",
+     "url": None,           "status": "soon", "icon": ICON_MISSIONS},
+    {"slug": "timesheets",  "name": "Time Tracking",   "tagline": "Hours on engagements",
+     "url": None,           "status": "soon", "icon": ICON_TIME},
+    {"slug": "purchasing",  "name": "Purchase Orders", "tagline": "Procurement",
+     "url": None,           "status": "soon", "icon": ICON_PURCHASE},
+    {"slug": "engagements", "name": "Engagements",     "tagline": "Client projects",
+     "url": None,           "status": "soon", "icon": ICON_ENGAGEMENTS},
+    {"slug": "accounting",  "name": "Accounting",      "tagline": "General ledger",
+     "url": "/accounting/", "status": "live", "icon": ICON_ACCOUNTING},
+    {"slug": "billing",     "name": "Billing",         "tagline": "Customer invoices",
+     "url": None,           "status": "soon", "icon": ICON_BILLING},
+    {"slug": "hr",          "name": "People",          "tagline": "Employees & grades",
+     "url": None,           "status": "soon", "icon": ICON_PEOPLE},
+    {"slug": "reports",     "name": "Reports",         "tagline": "Analytics",
+     "url": None,           "status": "soon", "icon": ICON_REPORTS},
+    {"slug": "settings",    "name": "Settings",        "tagline": "Configuration",
+     "url": None,           "status": "soon", "icon": ICON_SETTINGS},
 ]
 
 
+# ---------------------------------------------------------------------------
+# Workspace launcher
+# ---------------------------------------------------------------------------
+
 @login_required
 def workspace(request):
-    """Module launcher shown immediately after login.
-
-    Hardcoded tenant for now. When the Tenant model lands, this resolves
-    the user's active tenant via request.user.memberships.
-    """
     return render(
         request,
         "accounting/workspace.html",
+        {"modules": MODULES, "tenant_name": "Elite Advisors SARL"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Accounting Dashboard
+# ---------------------------------------------------------------------------
+
+def _journal_balance(journal):
+    """Return the net balance of all posted lines on this journal's default
+    account. For bank/cash journals this is effectively the bank balance."""
+    if not journal.default_account_id:
+        return Decimal("0")
+    agg = JournalEntryLine.objects.filter(
+        account_id=journal.default_account_id,
+        entry__state="posted",
+    ).aggregate(d=Sum("debit"), c=Sum("credit"))
+    return (agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))
+
+
+@login_required
+def dashboard(request):
+    bank_cash_journals = list(
+        Journal.objects.filter(type__in=["bank", "cash"], active=True).order_by("code")
+    )
+    for j in bank_cash_journals:
+        j.balance = _journal_balance(j)
+        j.tx_count = JournalEntryLine.objects.filter(
+            entry__journal=j, entry__state="posted"
+        ).count()
+
+    # Quick counters
+    counters = {
+        "draft_entries": JournalEntry.objects.filter(state="draft").count(),
+        "posted_entries": JournalEntry.objects.filter(state="posted").count(),
+        "customers": Partner.objects.filter(
+            Q(partner_type="customer") | Q(partner_type="both")
+        ).count(),
+        "suppliers": Partner.objects.filter(
+            Q(partner_type="vendor") | Q(partner_type="both")
+        ).count(),
+        "accounts_count": Account.objects.filter(deprecated=False).count(),
+        "fixed_assets": FixedAsset.objects.exclude(state="disposed").count(),
+    }
+
+    return render(
+        request,
+        "accounting/dashboard.html",
         {
-            "modules": MODULES,
+            "bank_cash_journals": bank_cash_journals,
+            "counters": counters,
             "tenant_name": "Elite Advisors SARL",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+@login_required
+def trial_balance(request):
+    accounts = (
+        Account.objects.filter(deprecated=False)
+        .annotate(
+            debit_sum=Sum("lines__debit", filter=Q(lines__entry__state="posted")),
+            credit_sum=Sum("lines__credit", filter=Q(lines__entry__state="posted")),
+        )
+        .order_by("code")
+    )
+    rows = []
+    total_d = Decimal("0")
+    total_c = Decimal("0")
+    for a in accounts:
+        d = a.debit_sum or Decimal("0")
+        c = a.credit_sum or Decimal("0")
+        if d == 0 and c == 0:
+            continue
+        rows.append(
+            {
+                "code": a.code,
+                "name": a.name,
+                "type": a.get_type_display(),
+                "debit": d,
+                "credit": c,
+                "balance": d - c,
+            }
+        )
+        total_d += d
+        total_c += c
+    return render(
+        request,
+        "accounting/trial_balance.html",
+        {
+            "rows": rows,
+            "total_debit": total_d,
+            "total_credit": total_c,
+            "balanced": total_d == total_c,
+            "tenant_name": "Elite Advisors SARL",
+        },
+    )
+
+
+@login_required
+def general_ledger(request):
+    qs = (
+        JournalEntryLine.objects.filter(entry__state="posted")
+        .select_related("entry", "entry__journal", "account", "partner")
+        .order_by("-entry__date", "-entry__id", "id")[:500]
+    )
+    return render(
+        request,
+        "accounting/general_ledger.html",
+        {"lines": qs, "tenant_name": "Elite Advisors SARL"},
+    )
+
+
+def _aging_buckets(qs, today=None):
+    """Bucket open (unreconciled) lines into 0-30 / 31-60 / 61-90 / >90."""
+    today = today or date.today()
+    buckets = {"current": Decimal("0"), "b30": Decimal("0"), "b60": Decimal("0"),
+               "b90": Decimal("0"), "over": Decimal("0")}
+    per_partner = {}
+    for line in qs.select_related("entry", "partner"):
+        age = (today - line.entry.date).days
+        amount = (line.debit or 0) - (line.credit or 0)
+        if line.partner_id is None:
+            continue
+        pp = per_partner.setdefault(
+            line.partner,
+            {"current": Decimal("0"), "b30": Decimal("0"), "b60": Decimal("0"),
+             "b90": Decimal("0"), "over": Decimal("0"), "total": Decimal("0")},
+        )
+        if age <= 30:
+            pp["current"] += amount; buckets["current"] += amount
+        elif age <= 60:
+            pp["b30"] += amount; buckets["b30"] += amount
+        elif age <= 90:
+            pp["b60"] += amount; buckets["b60"] += amount
+        elif age <= 180:
+            pp["b90"] += amount; buckets["b90"] += amount
+        else:
+            pp["over"] += amount; buckets["over"] += amount
+        pp["total"] += amount
+    rows = [{"partner": p, **vals} for p, vals in per_partner.items() if vals["total"] != 0]
+    rows.sort(key=lambda r: r["total"], reverse=True)
+    return rows, buckets
+
+
+@login_required
+def customer_aging(request):
+    qs = JournalEntryLine.objects.filter(
+        entry__state="posted",
+        account__type="receivable",
+        reconciled=False,
+    )
+    rows, totals = _aging_buckets(qs)
+    return render(
+        request,
+        "accounting/aging.html",
+        {
+            "title": "Customer Aging",
+            "rows": rows,
+            "totals": totals,
+            "partner_kind": "Customer",
+            "tenant_name": "Elite Advisors SARL",
+        },
+    )
+
+
+@login_required
+def supplier_aging(request):
+    qs = JournalEntryLine.objects.filter(
+        entry__state="posted",
+        account__type="payable",
+        reconciled=False,
+    )
+    rows, totals = _aging_buckets(qs)
+    # Payables show as credits → flip signs so the report reads positive
+    for r in rows:
+        for k in ("current", "b30", "b60", "b90", "over", "total"):
+            r[k] = -r[k]
+    for k in ("current", "b30", "b60", "b90", "over"):
+        totals[k] = -totals[k]
+    return render(
+        request,
+        "accounting/aging.html",
+        {
+            "title": "Supplier Aging",
+            "rows": rows,
+            "totals": totals,
+            "partner_kind": "Supplier",
+            "tenant_name": "Elite Advisors SARL",
+        },
+    )
+
+
+@login_required
+def fixed_assets_register(request):
+    assets = list(FixedAsset.objects.all().order_by("code"))
+    for a in assets:
+        a.computed_total_posted = a.total_posted
+        a.computed_book_value = a.book_value
+    totals = {
+        "cost": sum((a.purchase_cost for a in assets), Decimal("0")),
+        "depreciation": sum((a.computed_total_posted for a in assets), Decimal("0")),
+        "book_value": sum((a.computed_book_value for a in assets), Decimal("0")),
+    }
+    return render(
+        request,
+        "accounting/fixed_assets_register.html",
+        {"assets": assets, "totals": totals, "tenant_name": "Elite Advisors SARL"},
     )

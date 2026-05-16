@@ -45,8 +45,10 @@ host base defines (--ink, --muted, --hairline, --emerald, etc.).
   display: flex;
   align-items: stretch;
   gap: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  flex-wrap: wrap;
+  /* IMPORTANT: do NOT use overflow-x:auto here — it implicitly clips overflow-y
+     too, which truncates the dropdown menus that hang below this row. */
+  overflow: visible;
 }
 
 /* Each top-level item (whether direct link or dropdown trigger) */
@@ -97,7 +99,18 @@ host base defines (--ink, --muted, --hairline, --emerald, etc.).
   min-width: 260px;
   padding: 8px 0;
   box-shadow: 0 14px 30px -10px rgba(26, 24, 21, 0.18);
-  z-index: 200;
+  z-index: 9999;
+  /* Bridge the 1px gap between the button and the menu — without this,
+     mousing from the button to the menu can briefly leave the hover area. */
+  margin-top: 0;
+}
+.ea-nav-menu::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 0;
+  right: 0;
+  height: 6px;
 }
 .ea-nav-dd:hover .ea-nav-menu,
 .ea-nav-dd:focus-within .ea-nav-menu { display: block; }

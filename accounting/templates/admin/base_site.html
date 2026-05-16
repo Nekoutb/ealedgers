@@ -2,16 +2,18 @@
 
 {% block title %}{{ title }} · EA Ledgers · Elite Advisors{% endblock %}
 
+{% block dark-mode-vars %}{% endblock %}
+
 {% block branding %}
 <h1 id="site-name">
-  <a href="{% url 'admin:index' %}" style="display:inline-flex;align-items:center;gap:12px;text-decoration:none;color:inherit;">
-    <svg viewBox="0 0 60 44" width="22" fill="currentColor" aria-hidden="true" style="vertical-align:middle;flex:none;">
+  <a href="{% url 'admin:index' %}">
+    <svg viewBox="0 0 60 44" width="22" height="auto" fill="currentColor" aria-hidden="true" class="ea-mark">
       <rect width="56" height="8"/>
       <rect y="18" width="36" height="8"/>
       <rect y="36" width="56" height="8"/>
     </svg>
-    <span style="font-weight:500;letter-spacing:0.16em;text-transform:uppercase;font-size:14px;">Elite Advisors</span>
-    <span style="font-family:'Fraunces',serif;font-style:italic;font-weight:300;font-size:16px;text-transform:none;letter-spacing:0;opacity:0.7;">EA Ledgers</span>
+    <span class="ea-wordmark">Elite Advisors</span>
+    <span class="ea-product">EA Ledgers</span>
   </a>
 </h1>
 {% endblock %}
@@ -22,26 +24,29 @@
 {{ block.super }}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%23000'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
 
 <style>
 /* ============================================================
-   Black & White admin theme — overrides Django's CSS variables
+   EA LEDGERS — Black & White Admin Skin
+   Comprehensive override of Django 5.x admin defaults
    ============================================================ */
+
+/* ----- Force light theme always ---------------------------- */
 :root,
 html[data-theme="light"],
 html[data-theme="auto"],
 html[data-theme="dark"] {
-  color-scheme: light;
+  color-scheme: light !important;
 
   --primary: #000;
   --secondary: #000;
   --accent: #000;
-
   --primary-fg: #fff;
-  --body-fg: #000;
+
+  --body-fg: #111;
   --body-bg: #fff;
   --body-quiet-color: #6b6b6b;
   --body-loud-color: #000;
@@ -56,21 +61,20 @@ html[data-theme="dark"] {
   --breadcrumbs-bg: #fff;
 
   --link-fg: #000;
-  --link-hover-color: #6b6b6b;
+  --link-hover-color: #555;
   --link-selected-fg: #000;
 
-  --hairline-color: #e4e4e4;
+  --hairline-color: #e8e8e8;
   --border-color: #d0d0d0;
 
   --error-fg: #000;
-
-  --message-success-bg: #f4f4f4;
-  --message-warning-bg: #f4f4f4;
+  --message-success-bg: #f6f6f6;
+  --message-warning-bg: #f6f6f6;
   --message-error-bg: #fff;
 
   --darkened-bg: #fafafa;
   --selected-bg: #f4f4f4;
-  --selected-row: #f8f8f8;
+  --selected-row: #fafafa;
 
   --button-fg: #fff;
   --button-bg: #000;
@@ -90,169 +94,490 @@ html[data-theme="dark"] {
   --font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
 }
 
+/* Override dark-mode media query so OS preference can't darken the admin */
 @media (prefers-color-scheme: dark) {
-  :root, html[data-theme="auto"], html[data-theme="dark"] {
-    color-scheme: light;
-    --body-bg: #fff;
-    --body-fg: #000;
-    --darkened-bg: #fafafa;
-    --selected-bg: #f4f4f4;
-    --selected-row: #f8f8f8;
-    --primary: #000;
-    --header-bg: #000;
-    --header-color: #fff;
-    --link-fg: #000;
-    --breadcrumbs-bg: #fff;
-    --breadcrumbs-fg: #6b6b6b;
-    --breadcrumbs-link-fg: #000;
+  :root, html[data-theme="auto"] {
+    color-scheme: light !important;
+    --body-bg: #fff !important;
+    --body-fg: #111 !important;
+    --header-bg: #000 !important;
+    --header-color: #fff !important;
+    --link-fg: #000 !important;
+    --breadcrumbs-bg: #fff !important;
+    --breadcrumbs-link-fg: #000 !important;
+    --darkened-bg: #fafafa !important;
+    --selected-bg: #f4f4f4 !important;
   }
 }
 
-/* ---- Global ---- */
-body {
-  font-family: 'Public Sans', system-ui, sans-serif;
-  background: #fff;
-  color: #000;
+/* ----- Hide Django 5 theme toggle ------------------------- */
+.theme-toggle, button.theme-toggle,
+[aria-label*="theme" i], [title*="Toggle theme" i] {
+  display: none !important;
 }
-a, a:link { color: #000; }
-a:hover { color: #555; }
 
-/* ---- Header ---- */
+/* ----- Body ----------------------------------------------- */
+html, body {
+  background: #fff;
+  color: #111;
+}
+body {
+  font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a, a:link, a:visited { color: #000; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: #555; text-decoration-color: #555; }
+
+/* ============================================================
+   HEADER
+   ============================================================ */
 #header {
   background: #000;
   color: #fff;
   border-bottom: none;
-  padding: 14px 40px;
+  padding: 18px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
 }
-#header a:link, #header a:visited { color: #fff; }
-#user-tools { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500; }
-#user-tools a { border-bottom: 1px solid transparent; }
-#user-tools a:focus, #user-tools a:hover { border-bottom-color: #fff; color: #fff; }
 
-#site-name { font-size: inherit; }
-#site-name a { color: #fff; }
+#branding { flex: 1; min-width: 0; }
+#site-name { font-size: 14px; margin: 0; padding: 0; }
+#site-name a {
+  color: #fff !important;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+#site-name a:hover { color: #fff !important; opacity: 0.85; }
+#site-name .ea-mark { flex: none; }
+#site-name .ea-wordmark {
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+#site-name .ea-product {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-weight: 300;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #cfcfcf;
+  font-variation-settings: 'opsz' 18;
+}
 
-/* ---- Breadcrumbs ---- */
-div.breadcrumbs {
-  background: #fff;
-  color: #6b6b6b;
-  padding: 14px 40px;
-  border-bottom: 1px solid #000;
+#user-tools {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+#user-tools strong { font-weight: 700; color: #fff; }
+#user-tools a {
+  color: #fff !important;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+  transition: border-color 0.2s;
+}
+#user-tools a:hover { border-bottom-color: #fff; }
+#user-tools form { display: inline; margin: 0; padding: 0; }
+#user-tools button[type="submit"] {
+  background: transparent;
+  border: 1px solid #fff;
+  color: #fff;
+  padding: 6px 12px;
+  font: inherit;
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.2s, color 0.2s;
+}
+#user-tools button[type="submit"]:hover { background: #fff; color: #000; }
+
+/* ============================================================
+   BREADCRUMBS
+   ============================================================ */
+div.breadcrumbs {
+  background: #fff;
+  color: #6b6b6b;
+  padding: 16px 40px;
+  border-bottom: 1px solid #000;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
   font-weight: 500;
 }
-div.breadcrumbs a { color: #000; }
-div.breadcrumbs a:hover { color: #6b6b6b; }
+div.breadcrumbs a { color: #000; text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 1px; }
+div.breadcrumbs a:hover { border-bottom-color: #000; }
 
-/* ---- Content area padding ---- */
-#content { padding: 28px 40px; }
-@media (max-width: 768px) { #content { padding: 18px 16px; } }
-
-/* ---- Headings ---- */
-h1, h2, h3, h4, h5 {
-  font-family: 'Fraunces', 'Times New Roman', serif;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  font-variation-settings: 'opsz' 144;
+/* ============================================================
+   MAIN CONTENT WRAPPER
+   ============================================================ */
+#content {
+  padding: 36px 40px 64px;
+  background: #fff;
 }
-#content h1 { font-size: 32px; margin-bottom: 16px; }
+@media (max-width: 900px) { #content { padding: 24px 20px 48px; } }
+
+#content h1 {
+  font-family: 'Fraunces', 'Times New Roman', serif;
+  font-weight: 350;
+  font-size: 44px;
+  line-height: 1.05;
+  letter-spacing: -0.022em;
+  margin: 0 0 28px;
+  font-variation-settings: 'opsz' 144;
+  color: #000;
+}
+#content h2 {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  margin: 28px 0 14px;
+}
+#content h3 {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #000;
+  margin: 28px 0 12px;
+}
+
+/* ============================================================
+   INDEX / DASHBOARD — "Site administration" page
+   ============================================================ */
+#content-main { display: grid; gap: 24px; }
+
+.app-accounting, .app-auth, .module {
+  border: 1px solid #000;
+  background: #fff;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
 .module h2, .module caption, .inline-group h2 {
   background: #000;
   color: #fff;
   font-family: 'Public Sans', sans-serif;
   font-size: 11px;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.24em;
   text-transform: uppercase;
-  font-weight: 500;
-  padding: 12px 14px;
+  font-weight: 600;
+  padding: 14px 18px;
+  margin: 0;
+  border: none;
+}
+.module h2 a, .module caption a { color: #fff; text-decoration: none; }
+.module h2 a:hover, .module caption a:hover { opacity: 0.75; }
+
+.module table { width: 100%; border: none; }
+.module table tr { border-bottom: 1px solid #eee; }
+.module table tr:last-child { border-bottom: none; }
+.module table th, .module table td {
+  padding: 14px 18px;
+  border: none;
+  background: #fff;
+  vertical-align: middle;
+}
+.module table th { width: auto; }
+.module table th a {
+  font-family: 'Fraunces', serif;
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  color: #000;
+  font-variation-settings: 'opsz' 144;
+}
+.module table th a:hover { color: #555; }
+.module table td { text-align: right; }
+.module table td a {
+  display: inline-block;
+  text-decoration: none;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid #000;
+  color: #000;
+  margin-left: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+.module table td a:hover { background: #000; color: #fff; }
+.addlink, .changelink, .deletelink, .viewlink {
+  background-image: none !important;
+  padding-left: 12px !important;
 }
 
-/* ---- Tables ---- */
-table {
+/* ----- Recent actions ----- */
+#recent-actions-module {
   border: 1px solid #000;
-  border-collapse: collapse;
-  width: 100%;
+  background: #fff;
+  margin-top: 0;
 }
-table thead th, thead th {
+#recent-actions-module h2 {
+  background: #000;
+  color: #fff;
+  padding: 14px 18px;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin: 0;
+}
+#recent-actions-module h3 {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #000;
+  padding: 14px 18px 8px;
+  margin: 0;
+  border-bottom: 1px solid #eee;
+}
+#recent-actions-module ul.actionlist { padding: 8px 18px 14px; margin: 0; list-style: none; }
+#recent-actions-module ul.actionlist li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+#recent-actions-module ul.actionlist li:last-child { border-bottom: none; }
+#recent-actions-module .mini.quiet,
+#recent-actions-module p {
+  padding: 14px 18px;
+  color: #6b6b6b;
+  font-size: 13px;
+  margin: 0;
+  font-style: italic;
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+}
+
+/* Two-column dashboard layout */
+@media (min-width: 1024px) {
+  #content-main { grid-template-columns: 2fr 1fr; align-items: start; }
+  #content-related { margin: 0; padding: 0; }
+}
+
+/* ============================================================
+   CHANGE LIST (table views)
+   ============================================================ */
+#changelist {
+  background: #fff;
+  border: 1px solid #000;
+}
+#changelist-search { padding: 16px 18px; border-bottom: 1px solid #000; background: #fafafa; }
+#changelist-search input[type="text"] {
+  border: 1px solid #000;
+  padding: 9px 12px;
+  font-size: 14px;
+  width: 280px;
+  border-radius: 0;
+}
+#changelist-search input[type="submit"] {
+  background: #000; color: #fff; border: 1px solid #000;
+  padding: 9px 18px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  border-radius: 0;
+  font-weight: 600;
+  margin-left: 4px;
+  cursor: pointer;
+}
+#changelist-search input[type="submit"]:hover { background: #fff; color: #000; }
+
+#changelist table { width: 100%; border-collapse: collapse; border: none; }
+#changelist thead th {
   background: #fff;
   color: #000;
-  border-bottom: 1px solid #000;
   font-family: 'Public Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 14px 14px;
+  border-bottom: 1px solid #000;
+  text-align: left;
+}
+#changelist thead th a { color: #000; text-decoration: none; }
+#changelist thead th a:hover { color: #555; }
+#changelist tbody td, #changelist tbody th {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+  font-size: 14px;
+}
+#changelist tbody tr:hover td, #changelist tbody tr:hover th { background: #fafafa; }
+#changelist tbody tr.selected td, #changelist tbody tr.selected th { background: #f4f4f4; }
+.row1, .row2 { background: #fff !important; }
+
+/* Sort indicators */
+#changelist thead th.sorted, #changelist thead th.sorted a { color: #000; font-weight: 700; }
+
+/* Action bar above table */
+.actions {
+  background: #fafafa;
+  border-bottom: 1px solid #000;
+  padding: 14px 18px;
+  font-size: 12px;
+}
+.actions select, .actions input[type="submit"] {
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 0;
+  border: 1px solid #000;
+}
+.actions input[type="submit"] {
+  background: #000; color: #fff; cursor: pointer;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.actions input[type="submit"]:hover { background: #fff; color: #000; }
+.actions .question, .actions span.all { color: #6b6b6b; font-size: 11px; }
+
+/* ----- Filter sidebar ----- */
+#changelist-filter {
+  background: #fff;
+  border-left: 1px solid #000;
+  width: 230px;
+}
+#changelist-filter h2 {
+  background: #000;
+  color: #fff;
+  padding: 12px 16px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin: 0;
+}
+#changelist-filter h3 {
+  padding: 14px 16px 6px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #000;
+  font-weight: 600;
+  margin: 0;
+}
+#changelist-filter ul { padding: 0 16px 14px; margin: 0; list-style: none; }
+#changelist-filter li { padding: 4px 0; }
+#changelist-filter li a {
+  color: #6b6b6b;
+  text-decoration: none;
+  font-size: 13px;
+  display: inline-block;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+}
+#changelist-filter li a:hover { color: #000; border-bottom-color: #000; }
+#changelist-filter li.selected { padding-left: 0; }
+#changelist-filter li.selected a { color: #000; font-weight: 700; border-bottom: 2px solid #000; }
+
+/* ----- Pagination ----- */
+.paginator {
+  padding: 18px;
+  border-top: 1px solid #000;
+  background: #fff;
+  font-size: 12px;
+  color: #6b6b6b;
+}
+.paginator a, .paginator .this-page {
+  display: inline-block;
+  border: 1px solid #000;
+  padding: 6px 12px;
+  margin: 0 2px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.paginator a { background: #fff; color: #000; }
+.paginator a:hover { background: #000; color: #fff; }
+.paginator .this-page { background: #000; color: #fff; border-color: #000; }
+.paginator .end { font-weight: 700; }
+
+/* ============================================================
+   CHANGE FORM (add/edit views)
+   ============================================================ */
+.object-tools { float: right; margin-bottom: 0; }
+.object-tools a, .object-tools li a {
+  background: #000 !important;
+  color: #fff !important;
+  border: 1px solid #000 !important;
+  border-radius: 0 !important;
+  padding: 8px 16px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-left: 6px;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.2s, color 0.2s;
+}
+.object-tools a:hover, .object-tools li a:hover {
+  background: #fff !important;
+  color: #000 !important;
+}
+.object-tools a::before, .object-tools .addlink::before { background: none !important; content: ''; }
+
+fieldset.module {
+  border: 1px solid #000;
+  border-radius: 0;
+  margin-bottom: 28px;
+  background: #fff;
+}
+fieldset .description { padding: 10px 18px; color: #6b6b6b; font-size: 12px; }
+
+.form-row {
+  padding: 16px 18px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+}
+.form-row:last-of-type { border-bottom: none; }
+.form-row label, label {
+  display: inline-block;
   font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  padding: 12px 10px;
-}
-table tbody td, table tbody th {
-  border-bottom: 1px solid #e4e4e4;
-  padding: 10px 10px;
-}
-table tr:hover td { background: #f8f8f8; }
-.row1 { background: #fff; }
-.row2 { background: #fafafa; }
-
-/* ---- Buttons ---- */
-.button, input[type=submit], input[type=button],
-.submit-row input, a.button, .button.default {
-  background: #000;
-  color: #fff;
-  border: 1px solid #000;
-  border-radius: 0;
-  padding: 10px 18px;
-  font-family: 'Public Sans', sans-serif;
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
-}
-.button:hover, input[type=submit]:hover, input[type=button]:hover,
-.submit-row input:hover, a.button:hover, .button.default:hover {
-  background: #fff;
   color: #000;
+  margin-bottom: 8px;
 }
-.submit-row {
-  background: #fafafa;
-  border-top: 1px solid #000;
-  padding: 16px;
-}
-.submit-row input.deletelink, .deletelink {
-  background: #fff;
-  color: #000;
-  border: 1px solid #000;
-}
-.submit-row input.deletelink:hover, .deletelink:hover {
-  background: #000;
-  color: #fff;
+.form-row .help, .form-row .helptext, p.help, .help-block {
+  color: #6b6b6b;
+  font-size: 12px;
+  font-style: normal;
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  margin-top: 6px;
 }
 
-/* ---- Object tools (top-right "Add" buttons) ---- */
-.object-tools { float: right; }
-.object-tools a {
-  background: #000 !important;
-  color: #fff !important;
-  border: 1px solid #000;
-  border-radius: 0 !important;
-  padding: 8px 16px !important;
-  font-size: 10px !important;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-.object-tools a:hover {
-  background: #fff !important;
-  color: #000 !important;
-}
-.object-tools a.addlink::before { color: inherit; }
-
-/* ---- Inputs ---- */
+/* Inputs */
 input[type=text], input[type=email], input[type=password], input[type=number],
-input[type=url], input[type=search], input[type=tel], input[type=date],
-input[type=datetime-local], input[type=time], textarea, select {
+input[type=url], input[type=search], input[type=tel],
+input[type=date], input[type=datetime-local], input[type=time],
+textarea, select {
   border: 1px solid #000;
   border-radius: 0;
   padding: 10px 12px;
@@ -260,103 +585,215 @@ input[type=datetime-local], input[type=time], textarea, select {
   font-size: 14px;
   background: #fff;
   color: #000;
+  width: auto;
+  min-width: 240px;
+  box-shadow: none;
 }
+.vTextField, .vDateField, .vTimeField, .vDateTimeField { min-width: 240px; }
 input[type=text]:focus, input[type=email]:focus, input[type=password]:focus,
 input[type=number]:focus, input[type=url]:focus, input[type=search]:focus,
-textarea:focus, select:focus {
+input[type=tel]:focus, input[type=date]:focus, input[type=datetime-local]:focus,
+input[type=time]:focus, textarea:focus, select:focus {
   outline: none;
   box-shadow: inset 0 0 0 1px #000;
   border-color: #000;
 }
-textarea { resize: vertical; }
-fieldset.module {
+textarea { resize: vertical; min-height: 100px; }
+select[multiple] { min-height: 120px; }
+
+/* Checkboxes & radios — restyled */
+input[type=checkbox], input[type=radio] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
   border: 1px solid #000;
   border-radius: 0;
-  margin-bottom: 24px;
+  background: #fff;
+  vertical-align: middle;
+  margin-right: 6px;
+  cursor: pointer;
+  position: relative;
+}
+input[type=radio] { border-radius: 50%; }
+input[type=checkbox]:checked { background: #000; }
+input[type=checkbox]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 0;
+  width: 5px; height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type=radio]:checked { background: radial-gradient(circle, #000 40%, #fff 45%); }
+
+/* ----- Submit row ----- */
+.submit-row {
+  background: #fafafa;
+  border: 1px solid #000;
+  padding: 16px;
+  margin-top: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.submit-row a.deletelink-box, .submit-row a.closelink, .submit-row p.deletelink-box { margin: 0; }
+.submit-row .deletelink, .submit-row a.deletelink, a.deletelink {
+  background: #fff !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
+  border-radius: 0 !important;
+  padding: 10px 18px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+}
+.submit-row .deletelink:hover, .submit-row a.deletelink:hover, a.deletelink:hover {
+  background: #000 !important; color: #fff !important;
 }
 
-/* ---- Form rows / fieldsets ---- */
-.form-row { padding: 14px 16px; border-bottom: 1px solid #e4e4e4; }
-.form-row:last-child { border-bottom: none; }
-.form-row label { font-weight: 500; font-size: 12px; letter-spacing: 0.06em; }
+input[type=submit], input[type=button], button[type=submit], .button, a.button {
+  background: #000;
+  color: #fff;
+  border: 1px solid #000;
+  border-radius: 0;
+  padding: 10px 18px;
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.2s, color 0.2s;
+}
+input[type=submit]:hover, input[type=button]:hover, button[type=submit]:hover,
+.button:hover, a.button:hover {
+  background: #fff;
+  color: #000;
+}
+input[type=submit].default, input[type=submit][name="_save"] { background: #000; color: #fff; }
+input[type=submit].default:hover, input[type=submit][name="_save"]:hover { background: #fff; color: #000; }
 
-/* ---- Selected row highlight ---- */
-tr.selected td, tr.selected th { background: #f0f0f0; }
+/* ============================================================
+   INLINES (related objects on change form)
+   ============================================================ */
+.inline-group {
+  border: 1px solid #000;
+  margin-bottom: 28px;
+}
+.inline-group h2 { /* uses generic .module h2 styling above */ }
+.inline-related { background: #fff; border-bottom: 1px solid #000; padding: 14px 18px; }
+.inline-related h3, .inline-related .form-row > h3, .inline-related .original p {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #6b6b6b;
+  margin: 0 0 10px;
+}
+.tabular .module { border: none; }
+.tabular table { border: none; }
+.tabular table thead th {
+  background: #fff;
+  color: #000;
+  border-bottom: 1px solid #000;
+  padding: 10px 12px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.tabular table tbody td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+.add-row a {
+  font-size: 10px !important;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 8px 14px !important;
+  border: 1px solid #000;
+  text-decoration: none;
+  color: #000;
+  background-image: none !important;
+}
+.add-row a:hover { background: #000; color: #fff; }
 
-/* ---- Messages (success/warning/error banners) ---- */
-ul.messagelist { padding: 0; margin: 0 0 20px; }
+/* ============================================================
+   MESSAGES
+   ============================================================ */
+ul.messagelist { padding: 0; margin: 0 0 24px; list-style: none; }
 ul.messagelist li {
   border: 1px solid #000;
   padding: 12px 16px;
   font-size: 13px;
   background: #fff;
   color: #000;
-  list-style: none;
+  margin-bottom: 8px;
+  background-image: none !important;
+  padding-left: 16px !important;
 }
-ul.messagelist li.success { border-left: 4px solid #000; }
+ul.messagelist li.success { border-left-width: 4px; }
 ul.messagelist li.warning, ul.messagelist li.error {
-  border-left: 4px solid #000;
+  border-left-width: 4px;
   background: #fafafa;
 }
 
-/* ---- Pagination ---- */
-.paginator { padding: 16px 0; border-top: 1px solid #000; font-size: 12px; }
-.paginator a, .paginator .this-page {
+/* ============================================================
+   MISC
+   ============================================================ */
+/* Help / utilities */
+.help, p.help, form p.help, div.help {
+  color: #6b6b6b; font-size: 12px; font-style: normal;
+  font-family: 'Fraunces', serif; font-weight: 300;
+}
+.errornote, .errorlist {
+  background: #fff;
   border: 1px solid #000;
-  padding: 6px 12px;
-  margin: 0 2px;
-  text-decoration: none;
-  background: #fff;
+  border-left-width: 4px;
   color: #000;
-}
-.paginator .this-page { background: #000; color: #fff; }
-.paginator a:hover { background: #000; color: #fff; }
-
-/* ---- Filter sidebar ---- */
-#changelist-filter {
-  background: #fff;
-  border-left: 1px solid #000;
-}
-#changelist-filter h2 {
-  background: #000;
-  color: #fff;
   padding: 12px 16px;
+  font-size: 13px;
+}
+.errorlist li { margin: 0; }
+
+/* Calendar / datetime widget */
+.calendar caption, .calendarbox h2 { background: #000; color: #fff; }
+.calendar td a:hover, .calendar td.selected a { background: #000; color: #fff; }
+
+/* Selector (M2M) widget */
+.selector { border: 1px solid #000; padding: 8px; }
+.selector .selector-available, .selector .selector-chosen {
+  background: #fff; border: 1px solid #000;
+}
+.selector h2 { background: #000; color: #fff; padding: 8px 10px; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+
+/* Login page (admin's own /admin/login/ — though we redirect to /) */
+.login #container, .login #content {
+  background: #fff;
+  border: 1px solid #000;
+  box-shadow: none;
+}
+.login #header { padding: 24px 28px; }
+
+/* Footer */
+#footer {
+  background: #fff;
+  color: #6b6b6b;
+  padding: 18px 40px;
+  border-top: 1px solid #000;
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   font-weight: 500;
 }
-#changelist-filter h3 {
-  font-family: 'Public Sans', sans-serif;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #000;
-  padding: 12px 16px 6px;
-}
-#changelist-filter li.selected { border-left: 3px solid #000; }
-#changelist-filter li.selected a { color: #000; font-weight: 600; }
-#changelist-filter li a { color: #6b6b6b; }
-#changelist-filter li a:hover { color: #000; }
 
-/* ---- Search bar ---- */
-#changelist-search input[type=submit] {
-  background: #000; color: #fff; border: 1px solid #000;
-  border-radius: 0;
-}
-
-/* ---- Help text ---- */
-.help, p.help, form p.help, div.help { color: #6b6b6b; font-size: 12px; font-style: normal; }
-
-/* ---- Login page (admin's built-in fallback — though we redirect to /) ---- */
-.login #container {
-  background: #fff;
-  border: 1px solid #000;
-  box-shadow: none;
-}
-.login #header { padding: 24px; }
-
-/* ---- Footer / branding ---- */
-#footer { background: #fff; color: #6b6b6b; padding: 16px 40px; border-top: 1px solid #000; }
+/* Force monospace where it makes sense (codes, IDs) */
+.code, code, pre, tt, .vAdminTextareaField { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; }
 </style>
 {% endblock %}

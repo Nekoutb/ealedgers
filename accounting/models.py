@@ -9,6 +9,7 @@ new `Tenant` model. The FK is nullable in this migration; a follow-up will
 tighten it to NOT NULL once the middleware and managers are in place.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
@@ -1295,3 +1296,323 @@ class SupplierBillLine(models.Model):
     @property
     def amount(self):
         return self.amount_untaxed + self.amount_tax
+
+
+# ---------------------------------------------------------------------------
+# Bank reconciliation (Phase 1.3)
+# ---------------------------------------------------------------------------
+
+
+class BankStatement(models.Model):
+    """An imported bank statement (one upload = one statement).
+
+    Workflow:
+      1. User uploads a CSV → rows become BankStatementLine objects.
+      2. For each line, user either:
+         (a) MATCHES it to an existing posted JournalEntryLine on the
+             same bank account (typically the bank side of a payment
+             entry from an invoice or bill), reconciling both sides; or
+         (b) POSTS a new JournalEntry inline (bank fee, transfer,
+             cash deposit, etc.). Until the dedicated GL UI is built
+             (Phase 1.4), this is done via the admin add view.
+      3. State flips to ``reconciled`` once every line is matched
+         or posted.
+    """
+
+    STATES = [
+        ('draft', 'Draft'),
+        ('in_progress', 'In progress'),
+        ('reconciled', 'Reconciled'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='bank_statements',
+    )
+    journal = models.ForeignKey(
+        Journal, on_delete=models.PROTECT, related_name='bank_statements',
+        limit_choices_to={'type__in': ['bank', 'cash']},
+        help_text='Bank or cash journal this statement covers',
+    )
+    period_start = models.DateField()
+    period_end = models.DateField()
+    opening_balance = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal('0'),
+        help_text='Balance per the bank at start of period',
+    )
+    closing_balance = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal('0'),
+        help_text='Balance per the bank at end of period',
+    )
+    state = models.CharField(max_length=16, choices=STATES, default='draft')
+    notes = models.TextField(blank=True)
+
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='+',
+    )
+    imported_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-period_end', '-id']
+
+    def __str__(self):
+        return f'{self.journal.code} {self.period_start} → {self.period_end}'
+
+    @property
+    def total_inflow(self):
+        return self.lines.filter(amount__gt=0).aggregate(s=models.Sum('amount'))['s'] or Decimal('0')
+
+    @property
+    def total_outflow(self):
+        return abs(self.lines.filter(amount__lt=0).aggregate(s=models.Sum('amount'))['s'] or Decimal('0'))
+
+    @property
+    def computed_closing(self):
+        net = self.lines.aggregate(s=models.Sum('amount'))['s'] or Decimal('0')
+        return self.opening_balance + net
+
+    @property
+    def reconciled_lines_count(self):
+        return self.lines.exclude(state='unmatched').count()
+
+    @property
+    def total_lines_count(self):
+        return self.lines.count()
+
+    @property
+    def is_fully_reconciled(self):
+        return self.total_lines_count > 0 and self.reconciled_lines_count == self.total_lines_count
+
+    def update_state(self):
+        """Recompute state based on line statuses. Idempotent."""
+        n_total = self.total_lines_count
+        n_done = self.reconciled_lines_count
+        if n_total == 0 or n_done == 0:
+            new_state = 'draft'
+        elif n_done < n_total:
+            new_state = 'in_progress'
+        else:
+            new_state = 'reconciled'
+        if new_state != self.state:
+            self.state = new_state
+            self.save(update_fields=['state', 'updated_at'])
+
+
+class BankStatementLine(models.Model):
+    """A single row from an imported bank statement."""
+
+    STATES = [
+        ('unmatched', 'Unmatched'),
+        ('matched', 'Matched'),
+        ('posted', 'Posted'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='bank_statement_lines',
+    )
+    statement = models.ForeignKey(
+        BankStatement, on_delete=models.CASCADE, related_name='lines',
+    )
+    sequence = models.IntegerField(default=10)
+    transaction_date = models.DateField()
+    value_date = models.DateField(null=True, blank=True)
+    description = models.CharField(max_length=512)
+    reference = models.CharField(max_length=64, blank=True)
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2,
+        help_text='Signed: positive = inflow, negative = outflow',
+    )
+    state = models.CharField(max_length=16, choices=STATES, default='unmatched')
+
+    matched_entry_line = models.ForeignKey(
+        JournalEntryLine, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='matched_bank_lines',
+    )
+    generated_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='generated_from_bank_lines',
+    )
+
+    matched_at = models.DateTimeField(null=True, blank=True)
+    matched_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='+',
+    )
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['statement', 'sequence', 'transaction_date', 'id']
+
+    def __str__(self):
+        sign = '+' if self.amount >= 0 else ''
+        return f'{self.transaction_date} {sign}{self.amount} {self.description[:40]}'
+
+    @property
+    def is_inflow(self):
+        return self.amount > 0
+
+    @property
+    def is_outflow(self):
+        return self.amount < 0
+
+    @property
+    def abs_amount(self):
+        return abs(self.amount)
+
+    def candidate_entry_lines(self, *, days_window=7):
+        """JournalEntryLine rows that could plausibly match this line:
+        same bank account, matching magnitude on the correct side
+        (inflow→debit, outflow→credit), within ±days_window of our date,
+        not already matched to another statement line."""
+        if not self.statement.journal.default_account_id:
+            return JournalEntryLine.objects.none()
+        bank_acct = self.statement.journal.default_account
+        date_lo = self.transaction_date - timedelta(days=days_window)
+        date_hi = self.transaction_date + timedelta(days=days_window)
+        qs = (
+            JournalEntryLine.objects.for_tenant(self.tenant)
+            .select_related('entry', 'account', 'partner')
+            .filter(
+                account=bank_acct,
+                entry__state='posted',
+                entry__date__gte=date_lo,
+                entry__date__lte=date_hi,
+            )
+            .exclude(matched_bank_lines__isnull=False)
+            .order_by('entry__date', 'id')
+        )
+        if self.is_inflow:
+            qs = qs.filter(debit=self.amount)
+        else:
+            qs = qs.filter(credit=self.abs_amount)
+        return qs
+
+    @transaction.atomic
+    def match_to(self, entry_line, *, user=None):
+        """Manually reconcile this line against an existing JE line."""
+        if self.state != 'unmatched':
+            raise ValidationError(f'Line is already {self.get_state_display().lower()}.')
+        bank_acct = self.statement.journal.default_account
+        if entry_line.account_id != bank_acct.id:
+            raise ValidationError('Entry line is on a different account.')
+        if self.is_inflow and entry_line.debit != self.amount:
+            raise ValidationError('Amount mismatch (inflow vs entry-line debit).')
+        if self.is_outflow and entry_line.credit != self.abs_amount:
+            raise ValidationError('Amount mismatch (outflow vs entry-line credit).')
+        if entry_line.matched_bank_lines.exclude(pk=self.pk).exists():
+            raise ValidationError('Entry line is already reconciled with another bank line.')
+        self.matched_entry_line = entry_line
+        self.matched_at = timezone.now()
+        self.matched_by = user
+        self.state = 'matched'
+        self.save()
+        self.statement.update_state()
+
+    @transaction.atomic
+    def unmatch(self):
+        if self.state == 'posted':
+            raise ValidationError(
+                'This line generated a journal entry; cancel that entry '
+                'first if you want to revert reconciliation.'
+            )
+        if self.state == 'unmatched':
+            return
+        self.matched_entry_line = None
+        self.matched_at = None
+        self.matched_by = None
+        self.state = 'unmatched'
+        self.save()
+        self.statement.update_state()
+
+
+def parse_bank_csv(text, *, date_format='%Y-%m-%d'):
+    """Parse a flexible bank-statement CSV into row dicts ready to create
+    BankStatementLine objects.
+
+    Recognised column names (case-insensitive, any order):
+      - date / transaction date / tx date
+      - description / memo / label / libellé
+      - amount / value / montant (signed, negative = outflow)
+      - reference / ref / référence
+      - value date / value_date / date_valeur
+
+    Auto-detects delimiter (, ; tab |). Returns a list of tuples
+    ``(row_dict_or_None, error_str_or_None)`` so callers can show
+    per-row parse errors instead of failing the whole import.
+    """
+    import csv
+    import io
+    from datetime import datetime
+
+    if not text:
+        return []
+    sample = text[:1024]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    if not reader.fieldnames:
+        return []
+    cols = {name.strip().lower(): name for name in reader.fieldnames if name}
+
+    def col(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        return None
+
+    date_col = col('date', 'transaction date', 'tx date')
+    desc_col = col('description', 'memo', 'label', 'libelle', 'libellé')
+    amt_col = col('amount', 'value', 'montant')
+    ref_col = col('reference', 'ref', 'référence')
+    val_col = col('value date', 'value_date', 'date_valeur')
+
+    if not (date_col and desc_col and amt_col):
+        raise ValueError(
+            'CSV must have columns for date, description, and amount '
+            f'(found: {list(cols.keys())}).'
+        )
+
+    def _parse_date(raw):
+        raw = (raw or '').strip()
+        if not raw:
+            return None
+        for fmt in (date_format, '%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y'):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+        raise ValueError(f"Couldn't parse date {raw!r}")
+
+    out = []
+    for raw in reader:
+        try:
+            d = _parse_date(raw.get(date_col))
+            if d is None:
+                raise ValueError('date is empty')
+            a_raw = (raw.get(amt_col) or '').strip()
+            a_norm = a_raw.replace(' ', '').replace(' ', '')
+            if ',' in a_norm and '.' in a_norm:
+                a_norm = a_norm.replace(',', '')
+            elif ',' in a_norm:
+                a_norm = a_norm.replace(',', '.')
+            amt = Decimal(a_norm)
+            vd = _parse_date(raw.get(val_col)) if val_col else None
+            out.append((
+                {
+                    'transaction_date': d,
+                    'value_date': vd,
+                    'description': (raw.get(desc_col) or '').strip()[:512],
+                    'reference': (raw.get(ref_col) or '').strip()[:64] if ref_col else '',
+                    'amount': amt,
+                },
+                None,
+            ))
+        except Exception as exc:
+            out.append((None, f'row {reader.line_num}: {exc}'))
+    return out

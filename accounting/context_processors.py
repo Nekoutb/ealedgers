@@ -56,7 +56,7 @@ NAV = [
             _item("Fleet"),
         ]),
         _group(title="Closing", items=[
-            _item("Reconcile"),
+            _item("Reconcile", "/accounting/bank/"),
             _item("Tax Returns"),
             _item("Lock Dates"),
             _item("Secure Entries"),

@@ -5,6 +5,8 @@ from django.utils import timezone
 
 from .models import (
     Account,
+    BankStatement,
+    BankStatementLine,
     Company,
     CustomerInvoice,
     CustomerInvoiceLine,
@@ -581,3 +583,60 @@ class SupplierBillLineAdmin(TenantAwareAdmin):
     @admin.display(description='Total')
     def amount_disp(self, obj):
         return obj.amount
+
+
+# ---------------------------------------------------------------------------
+# Bank reconciliation (Phase 1.3)
+# ---------------------------------------------------------------------------
+
+
+class BankStatementLineInline(admin.TabularInline):
+    model = BankStatementLine
+    extra = 0
+    fields = ('sequence', 'transaction_date', 'description', 'reference',
+              'amount', 'state', 'matched_entry_line', 'generated_entry')
+    readonly_fields = ('state', 'matched_entry_line', 'generated_entry')
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        tenant = getattr(request, 'tenant', None)
+        if tenant is None:
+            return qs.none()
+        return qs.filter(tenant=tenant)
+
+    def save_new(self, form, commit=True):
+        obj = super().save_new(form, commit=False)
+        obj.tenant_id = obj.statement.tenant_id
+        if commit:
+            obj.save()
+        return obj
+
+
+@admin.register(BankStatement)
+class BankStatementAdmin(TenantAwareAdmin):
+    list_display = ('__str__', 'journal', 'period_start', 'period_end',
+                    'opening_balance', 'closing_balance', 'state',
+                    'reconciled_lines_count', 'total_lines_count')
+    list_filter = ('state', 'journal')
+    readonly_fields = ('state', 'imported_by', 'imported_at', 'updated_at')
+    fieldsets = (
+        (None, {'fields': ('journal', 'period_start', 'period_end',
+                           'opening_balance', 'closing_balance', 'state', 'notes')}),
+        ('Audit', {'classes': ('collapse',),
+                   'fields': ('imported_by', 'imported_at', 'updated_at')}),
+    )
+    inlines = [BankStatementLineInline]
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.imported_by_id:
+            obj.imported_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(BankStatementLine)
+class BankStatementLineAdmin(TenantAwareAdmin):
+    list_display = ('transaction_date', 'description', 'amount', 'state',
+                    'statement', 'matched_entry_line', 'generated_entry')
+    list_filter = ('state', 'statement__journal')
+    search_fields = ('description', 'reference')
+    list_select_related = ('statement', 'matched_entry_line', 'generated_entry')

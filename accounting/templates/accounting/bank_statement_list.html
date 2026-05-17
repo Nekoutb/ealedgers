@@ -1,0 +1,104 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}Bank Reconciliation{% endblock %}
+
+{% block content %}
+
+<section class="page-head">
+  <div>
+    <p class="text-eyebrow mb-2">Bank reconciliation</p>
+    <h1 class="h-display">Statements</h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>{{ statements|length }} imported</div>
+  </div>
+</section>
+
+<!-- Import form -->
+<details class="card p-5 mb-6">
+  <summary class="cursor-pointer text-sm font-semibold text-neutral-950">Import a new bank statement</summary>
+  <form method="post" action="{% url 'accounting:bank_statement_import' %}" class="mt-5 space-y-4">
+    {% csrf_token %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="label">Journal (bank or cash)</label>
+        <select name="journal_id" class="input" required>
+          <option value="">Pick one…</option>
+          {% for j in journals %}<option value="{{ j.id }}">{{ j.code }} — {{ j.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="label">Opening balance</label>
+          <input type="text" name="opening_balance" value="0" class="input text-mono">
+        </div>
+        <div>
+          <label class="label">Closing balance</label>
+          <input type="text" name="closing_balance" value="0" class="input text-mono">
+        </div>
+      </div>
+      <div>
+        <label class="label">Period start</label>
+        <input type="date" name="period_start" class="input" required>
+      </div>
+      <div>
+        <label class="label">Period end</label>
+        <input type="date" name="period_end" class="input" required>
+      </div>
+    </div>
+    <div>
+      <label class="label">CSV data (paste here)</label>
+      <textarea name="csv_text" rows="8" class="input text-mono text-xs" placeholder="date,description,amount,reference&#10;2026-05-10,Wire from ACME Customer,1073250,WIRE-001&#10;2026-05-11,Bank fee,-2500,&#10;..."></textarea>
+      <p class="text-xs text-neutral-500 mt-1">
+        Required columns (any order, case-insensitive): <span class="text-mono">date</span>, <span class="text-mono">description</span>, <span class="text-mono">amount</span> (signed: negative = outflow). Optional: <span class="text-mono">reference</span>, <span class="text-mono">value_date</span>. Auto-detects comma/semicolon delimiters.
+      </p>
+    </div>
+    <div class="flex justify-end">
+      <button type="submit" class="btn btn-primary text-xs">Import</button>
+    </div>
+  </form>
+</details>
+
+{% if statements %}
+<div class="overflow-x-auto">
+<table class="dt">
+  <thead>
+    <tr>
+      <th>Journal</th>
+      <th style="width: 120px;">Period start</th>
+      <th style="width: 120px;">Period end</th>
+      <th class="num">Opening</th>
+      <th class="num">Closing</th>
+      <th class="num">Lines</th>
+      <th style="width: 120px;">State</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in statements %}
+    <tr>
+      <td><a href="{% url 'accounting:bank_statement_detail' pk=s.id %}" class="font-semibold text-neutral-950 underline underline-offset-2 hover:text-neutral-700">{{ s.journal.code }} — {{ s.journal.name }}</a></td>
+      <td class="mono">{{ s.period_start|date:"Y-m-d" }}</td>
+      <td class="mono">{{ s.period_end|date:"Y-m-d" }}</td>
+      <td class="num">{{ s.opening_balance|floatformat:0|intcomma }}</td>
+      <td class="num">{{ s.closing_balance|floatformat:0|intcomma }}</td>
+      <td class="num">{{ s.done }} / {{ s.total }}</td>
+      <td>
+        {% if s.state == "draft" %}<span class="pill pill-draft">Draft</span>
+        {% elif s.state == "in_progress" %}<span class="pill pill-warning">In progress</span>
+        {% else %}<span class="pill pill-success">Reconciled</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">
+  No bank statements imported yet.<br>
+  Expand the form above to paste in your first CSV.
+</div>
+{% endif %}
+
+{% endblock %}

@@ -28,4 +28,11 @@ urlpatterns = [
     path("bills/<int:pk>/post/", views.bill_post, name="bill_post"),
     path("bills/<int:pk>/pay/", views.bill_record_payment, name="bill_record_payment"),
     path("bills/<int:pk>/cancel/", views.bill_cancel, name="bill_cancel"),
+
+    # Bank reconciliation (Phase 1.3)
+    path("bank/", views.bank_statement_list, name="bank_statement_list"),
+    path("bank/import/", views.bank_statement_import, name="bank_statement_import"),
+    path("bank/<int:pk>/", views.bank_statement_detail, name="bank_statement_detail"),
+    path("bank/line/<int:pk>/match/", views.bank_line_match, name="bank_line_match"),
+    path("bank/line/<int:pk>/unmatch/", views.bank_line_unmatch, name="bank_line_unmatch"),
 ]

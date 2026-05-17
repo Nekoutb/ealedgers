@@ -31,9 +31,8 @@
 
     <!-- Right side: tenant + user -->
     <div class="flex items-center gap-2">
-      <div class="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-700">
-        <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-brand);"></span>
-        {{ tenant_name }}
+      <div class="hidden sm:block">
+        {% include "accounting/_tenant_switcher.html" %}
       </div>
       <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
       <form method="post" action="/admin/logout/">

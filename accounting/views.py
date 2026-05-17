@@ -6,11 +6,16 @@ in-module pages (dashboard, reports). All in-module views go through
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q, F
-from django.shortcuts import render
+from django.http import HttpResponseRedirect
+from django.shortcuts import render, redirect
+from django.urls import reverse
+from django.views.decorators.http import require_POST
 
-from .middleware import tenant_required
+from .forms import SignupForm
+from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     Account,
     DepreciationLine,
@@ -18,6 +23,7 @@ from .models import (
     Journal,
     JournalEntry,
     JournalEntryLine,
+    Membership,
     Partner,
 )
 
@@ -148,6 +154,53 @@ MODULES = [
     {"slug": "settings",    "name": "Settings",        "tagline": "Configuration",
      "url": None,           "status": "soon", "icon": ICON_SETTINGS},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Sign-up + tenant switching
+# ---------------------------------------------------------------------------
+
+
+def signup(request):
+    """Self-serve sign-up. Creates User + Tenant + Membership atomically
+    and logs the new user in. Authenticated users get bounced to /workspace/."""
+    if request.user.is_authenticated:
+        return redirect("workspace")
+
+    if request.method == "POST":
+        form = SignupForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            # Auto-login. specify backend explicitly since multiple are wired.
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            # Pin the session to the freshly created tenant so the middleware
+            # doesn't have to fall back to "first membership" on the next request.
+            new_tenant = getattr(user, "_signup_tenant", None)
+            if new_tenant is not None:
+                request.session[SESSION_TENANT_KEY] = new_tenant.slug
+            return redirect("workspace")
+    else:
+        form = SignupForm()
+
+    return render(request, "accounting/signup.html", {"form": form})
+
+
+@login_required
+@require_POST
+def switch_tenant_view(request, slug):
+    """POST-only endpoint that swaps the active tenant. Bounces back to
+    the referrer (or /workspace/) on success, with a flash message on
+    failure left to a future enhancement."""
+    target = switch_tenant(request, slug)
+    if target is None:
+        # User tried to switch to a tenant they don't belong to — silently
+        # send them home. (No message framework wired up yet.)
+        return redirect("workspace")
+    # Honour the referrer when it's a same-host URL, else workspace.
+    referer = request.META.get("HTTP_REFERER", "")
+    if referer.startswith(request.build_absolute_uri("/")):
+        return HttpResponseRedirect(referer)
+    return redirect("workspace")
 
 
 # ---------------------------------------------------------------------------

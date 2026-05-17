@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.contrib.auth.views import LoginView
 from django.urls import include, path
 
-from accounting.views import workspace
+from accounting.views import signup, switch_tenant_view, workspace
 
 
 urlpatterns = [
@@ -17,6 +17,10 @@ urlpatterns = [
         ),
         name='landing',
     ),
+    # Self-serve sign-up (creates User + Tenant + Membership atomically)
+    path('signup/', signup, name='signup'),
+    # Tenant switcher (POST-only — flips the active tenant in session)
+    path('tenant/switch/<slug:slug>/', switch_tenant_view, name='switch_tenant'),
     # Post-login module launcher
     path('workspace/', workspace, name='workspace'),
     # The Accounting module (custom views — dashboard + reports)

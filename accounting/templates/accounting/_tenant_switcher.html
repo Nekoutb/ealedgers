@@ -1,0 +1,131 @@
+{% comment %}
+Tenant pill in the top bar.
+
+  Renders as:
+    - A static pill (current behaviour) if the user has 0 or 1 active
+      memberships — nothing to switch to.
+    - A dropdown with each tenant + a "Sign out" affordance if the user
+      has multiple memberships.
+
+  Context:
+    request.tenant       — currently active Tenant (may be None)
+    user_memberships     — list of active Memberships (from context_processor)
+{% endcomment %}
+
+{% if user_memberships|length > 1 %}
+  <div class="ea-tenant-switcher" tabindex="0">
+    <button type="button" class="ea-tenant-pill" aria-haspopup="true" aria-expanded="false">
+      <span class="ea-tenant-dot"></span>
+      <span class="ea-tenant-name">{{ request.tenant.name|default:"Pick tenant" }}</span>
+      <svg class="ea-tenant-caret" viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 4.5 L6 7.5 L9 4.5"/>
+      </svg>
+    </button>
+    <div class="ea-tenant-menu" role="menu">
+      <div class="ea-tenant-menu-title">Switch tenant</div>
+      {% for m in user_memberships %}
+        <form method="post" action="{% url 'switch_tenant' slug=m.tenant.slug %}" class="ea-tenant-form">
+          {% csrf_token %}
+          <button type="submit" class="ea-tenant-item {% if request.tenant and m.tenant.id == request.tenant.id %}active{% endif %}" role="menuitem">
+            <span class="ea-tenant-item-name">{{ m.tenant.name }}</span>
+            <span class="ea-tenant-item-role">{{ m.get_role_display }}</span>
+            {% if request.tenant and m.tenant.id == request.tenant.id %}
+            <svg class="ea-tenant-check" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 8 L6.5 11.5 L13 4.5"/>
+            </svg>
+            {% endif %}
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+  </div>
+
+<style>
+.ea-tenant-switcher { position: relative; display: inline-block; }
+.ea-tenant-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--neutral-200, #e5e5e5);
+  background: var(--neutral-50, #fafafa);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--neutral-700, #404040);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ea-tenant-pill:hover { background: #fff; border-color: var(--neutral-300, #d4d4d4); }
+.ea-tenant-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-brand, #0d9488);
+  flex: none;
+}
+.ea-tenant-caret { opacity: 0.6; flex: none; }
+.ea-tenant-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 240px;
+  background: #fff;
+  border: 1px solid var(--neutral-200, #e5e5e5);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.04);
+  padding: 4px;
+  z-index: 100;
+}
+.ea-tenant-switcher:hover .ea-tenant-menu,
+.ea-tenant-switcher:focus-within .ea-tenant-menu { display: block; }
+
+.ea-tenant-menu-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--neutral-500, #737373);
+  padding: 8px 10px 4px;
+}
+.ea-tenant-form { margin: 0; }
+.ea-tenant-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--neutral-700, #404040);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.ea-tenant-item:hover { background: var(--neutral-50, #fafafa); color: var(--neutral-950, #0a0a0a); }
+.ea-tenant-item.active {
+  background: var(--color-brand-soft, #ccfbf1);
+  color: var(--color-brand-darker, #115e59);
+  font-weight: 600;
+}
+.ea-tenant-item-name { flex: 1; min-width: 0; }
+.ea-tenant-item-role {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--neutral-500, #737373);
+  font-weight: 500;
+}
+.ea-tenant-item.active .ea-tenant-item-role { color: var(--color-brand-dark, #0f766e); }
+.ea-tenant-check { flex: none; color: var(--color-brand, #0d9488); }
+</style>
+{% else %}
+  <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-700">
+    <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-brand);"></span>
+    {{ request.tenant.name|default:"EA Ledgers" }}
+  </div>
+{% endif %}

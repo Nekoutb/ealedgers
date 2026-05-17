@@ -18,6 +18,8 @@ from .forms import SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     Account,
+    BankStatement,
+    BankStatementLine,
     CustomerInvoice,
     DepreciationLine,
     FixedAsset,
@@ -693,3 +695,180 @@ def bill_cancel(request, pk):
     except Exception as exc:
         messages.error(request, f"Could not cancel: {exc}")
     return redirect("accounting:bill_detail", pk=pk)
+
+
+# ---------------------------------------------------------------------------
+# Bank reconciliation (Phase 1.3)
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@tenant_required
+def bank_statement_list(request):
+    """Listing of bank statements per tenant."""
+    t = request.tenant
+    statements = list(
+        BankStatement.objects.for_tenant(t)
+        .select_related("journal")
+        .order_by("-period_end", "-id")[:200]
+    )
+    # Attach computed counts for the table
+    for s in statements:
+        s.done = s.reconciled_lines_count
+        s.total = s.total_lines_count
+    journals = (
+        Journal.objects.for_tenant(t)
+        .filter(type__in=("bank", "cash"), active=True)
+        .order_by("code")
+    )
+    return render(
+        request,
+        "accounting/bank_statement_list.html",
+        {"statements": statements, "journals": journals, "tenant_name": t.name},
+    )
+
+
+@login_required
+@tenant_required
+@require_POST
+def bank_statement_import(request):
+    """Create a new BankStatement from a CSV paste/upload."""
+    from django.contrib import messages
+    from .models import parse_bank_csv
+
+    t = request.tenant
+    journal_id = request.POST.get("journal_id")
+    period_start = request.POST.get("period_start")
+    period_end = request.POST.get("period_end")
+    opening_balance = request.POST.get("opening_balance") or "0"
+    closing_balance = request.POST.get("closing_balance") or "0"
+    csv_text = request.POST.get("csv_text") or ""
+
+    if not (journal_id and period_start and period_end and csv_text.strip()):
+        messages.error(request, "Pick a journal, dates, and paste CSV data.")
+        return redirect("accounting:bank_statement_list")
+
+    try:
+        journal = Journal.objects.for_tenant(t).get(pk=journal_id)
+    except Journal.DoesNotExist:
+        messages.error(request, "Journal not found.")
+        return redirect("accounting:bank_statement_list")
+
+    try:
+        rows = parse_bank_csv(csv_text)
+    except ValueError as exc:
+        messages.error(request, f"CSV parse failed: {exc}")
+        return redirect("accounting:bank_statement_list")
+
+    ok_rows = [r for r, err in rows if err is None]
+    errs = [err for r, err in rows if err is not None]
+
+    if not ok_rows:
+        messages.error(request, "No valid rows in the CSV. Errors: " + "; ".join(errs[:5]))
+        return redirect("accounting:bank_statement_list")
+
+    stmt = BankStatement.objects.create(
+        tenant=t,
+        journal=journal,
+        period_start=period_start,
+        period_end=period_end,
+        opening_balance=Decimal(opening_balance or "0"),
+        closing_balance=Decimal(closing_balance or "0"),
+        imported_by=request.user,
+    )
+    for i, data in enumerate(ok_rows, start=1):
+        BankStatementLine.objects.create(
+            tenant=t,
+            statement=stmt,
+            sequence=i * 10,
+            **data,
+        )
+    stmt.update_state()
+
+    if errs:
+        messages.warning(
+            request,
+            f"Imported {len(ok_rows)} lines, skipped {len(errs)} (first errors: "
+            + "; ".join(errs[:3]) + ").",
+        )
+    else:
+        messages.success(request, f"Imported {len(ok_rows)} lines.")
+    return redirect("accounting:bank_statement_detail", pk=stmt.pk)
+
+
+@login_required
+@tenant_required
+def bank_statement_detail(request, pk):
+    """Detail view with all lines + per-line match/post UI."""
+    t = request.tenant
+    stmt = (
+        BankStatement.objects.for_tenant(t)
+        .select_related("journal", "journal__default_account")
+        .get(pk=pk)
+    )
+    lines = list(
+        stmt.lines.select_related("matched_entry_line__entry",
+                                  "matched_entry_line__account",
+                                  "generated_entry__journal")
+        .order_by("sequence", "transaction_date", "id")
+    )
+    # Pre-compute candidate counts for unmatched lines so the template
+    # can show "(3 candidates)" hints without re-running the query each
+    # render.
+    for ln in lines:
+        if ln.state == "unmatched":
+            ln.candidate_count = ln.candidate_entry_lines().count()
+        else:
+            ln.candidate_count = 0
+    return render(
+        request,
+        "accounting/bank_statement_detail.html",
+        {"stmt": stmt, "lines": lines, "tenant_name": t.name},
+    )
+
+
+@login_required
+@tenant_required
+def bank_line_match(request, pk):
+    """Show candidate JE lines for one bank line, and accept a POSTed match."""
+    from django.contrib import messages
+
+    t = request.tenant
+    line = (
+        BankStatementLine.objects.for_tenant(t)
+        .select_related("statement", "statement__journal")
+        .get(pk=pk)
+    )
+    if request.method == "POST":
+        target_id = request.POST.get("entry_line_id")
+        try:
+            target = JournalEntryLine.objects.for_tenant(t).get(pk=target_id)
+            line.match_to(target, user=request.user)
+            messages.success(request, "Line matched.")
+        except JournalEntryLine.DoesNotExist:
+            messages.error(request, "Entry line not found.")
+        except Exception as exc:
+            messages.error(request, f"Could not match: {exc}")
+        return redirect("accounting:bank_statement_detail", pk=line.statement_id)
+
+    # GET: render the candidate picker
+    candidates = list(line.candidate_entry_lines())
+    return render(
+        request,
+        "accounting/bank_line_match.html",
+        {"line": line, "candidates": candidates, "tenant_name": t.name},
+    )
+
+
+@login_required
+@tenant_required
+@require_POST
+def bank_line_unmatch(request, pk):
+    from django.contrib import messages
+    line = BankStatementLine.objects.for_tenant(request.tenant).get(pk=pk)
+    try:
+        line.unmatch()
+        messages.success(request, "Match undone.")
+    except Exception as exc:
+        messages.error(request, f"Could not unmatch: {exc}")
+    return redirect("accounting:bank_statement_detail", pk=line.statement_id)

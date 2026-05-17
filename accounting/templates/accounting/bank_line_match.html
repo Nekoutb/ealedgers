@@ -1,0 +1,90 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}Match bank line{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-wrap items-center gap-2 mb-6">
+  <a href="{% url 'accounting:bank_statement_detail' pk=line.statement_id %}" class="btn btn-ghost text-xs">
+    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6"/>
+    </svg>
+    Back to statement
+  </a>
+</div>
+
+<section class="page-head">
+  <div>
+    <p class="text-eyebrow mb-2">Bank reconciliation · Match line</p>
+    <h1 class="h-display">Pick the entry this matches</h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+  </div>
+</section>
+
+<!-- The bank line we're matching -->
+<article class="card p-5 mb-6">
+  <div class="text-xs uppercase tracking-wider font-semibold text-neutral-500 mb-3">Bank statement line</div>
+  <div class="flex flex-wrap items-baseline gap-4">
+    <div class="text-mono text-sm text-neutral-700">{{ line.transaction_date|date:"Y-m-d" }}</div>
+    <div class="text-base font-semibold text-neutral-950 flex-1 min-w-0">{{ line.description }}</div>
+    <div class="text-mono text-xl font-semibold {% if line.is_outflow %}text-red-700{% else %}text-neutral-950{% endif %}">
+      {% if line.is_inflow %}+{% endif %}{{ line.amount|floatformat:0|intcomma }}
+    </div>
+  </div>
+  {% if line.reference %}<div class="text-xs text-neutral-500 mt-1">Ref: <span class="text-mono">{{ line.reference }}</span></div>{% endif %}
+</article>
+
+<!-- Candidate JE lines -->
+{% if candidates %}
+<div class="text-xs uppercase tracking-wider font-semibold text-neutral-500 mb-3">
+  Candidate journal-entry lines · same account, same amount, ±7 days
+</div>
+<div class="overflow-x-auto">
+<table class="dt">
+  <thead>
+    <tr>
+      <th style="width: 110px;">Date</th>
+      <th style="width: 140px;">Entry</th>
+      <th>Memo</th>
+      <th>Partner</th>
+      <th class="num" style="width: 130px;">Debit</th>
+      <th class="num" style="width: 130px;">Credit</th>
+      <th style="width: 100px;">Match</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in candidates %}
+    <tr>
+      <td class="mono">{{ c.entry.date|date:"Y-m-d" }}</td>
+      <td><a href="/admin/accounting/journalentry/{{ c.entry_id }}/change/" class="mono underline underline-offset-2 hover:text-neutral-700">{{ c.entry.name }}</a></td>
+      <td>{{ c.name|default:c.entry.ref|truncatechars:60 }}</td>
+      <td>{% if c.partner %}{{ c.partner.name }}{% else %}<span class="text-neutral-400">—</span>{% endif %}</td>
+      <td class="num">{% if c.debit %}{{ c.debit|floatformat:0|intcomma }}{% endif %}</td>
+      <td class="num">{% if c.credit %}{{ c.credit|floatformat:0|intcomma }}{% endif %}</td>
+      <td>
+        <form method="post" action="{% url 'accounting:bank_line_match' pk=line.id %}" class="inline">
+          {% csrf_token %}
+          <input type="hidden" name="entry_line_id" value="{{ c.id }}">
+          <button type="submit" class="btn btn-primary text-xs">Use this</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">
+  No matching journal-entry lines found on
+  <strong class="text-neutral-700">{{ line.statement.journal.default_account.code|default:"the bank account" }}</strong>
+  within ±7 days of this date.<br>
+  This usually means the entry hasn't been posted yet — go to
+  <a href="/admin/accounting/journalentry/add/?journal={{ line.statement.journal_id }}&date={{ line.transaction_date|date:'Y-m-d' }}">create a new journal entry</a>
+  for it (e.g. bank fee, transfer), then come back and match.
+</div>
+{% endif %}
+
+{% endblock %}

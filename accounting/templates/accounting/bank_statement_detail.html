@@ -1,0 +1,126 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}Statement {{ stmt.journal.code }} {{ stmt.period_end|date:"Y-m-d" }}{% endblock %}
+
+{% block content %}
+
+{% if messages %}
+  {% for m in messages %}
+  <div class="mb-4 px-3 py-2.5 text-sm rounded-md
+              {% if m.tags == 'success' %}bg-green-50 text-green-800 border border-green-200{% elif m.tags == 'error' %}bg-red-50 text-red-700 border border-red-200{% else %}bg-amber-50 text-amber-800 border border-amber-200{% endif %}"
+       role="alert">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="flex flex-wrap items-center gap-2 mb-6">
+  <a href="{% url 'accounting:bank_statement_list' %}" class="btn btn-ghost text-xs">
+    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6"/>
+    </svg>
+    Back to statements
+  </a>
+  <span class="text-sm text-neutral-500">
+    {% if stmt.state == "draft" %}<span class="pill pill-draft">Draft</span>
+    {% elif stmt.state == "in_progress" %}<span class="pill pill-warning">In progress</span>
+    {% else %}<span class="pill pill-success">Reconciled</span>{% endif %}
+  </span>
+</div>
+
+<section class="page-head">
+  <div>
+    <p class="text-eyebrow mb-2">{{ stmt.journal.code }} — {{ stmt.journal.name }}</p>
+    <h1 class="h-display">{{ stmt.period_start|date:"Y-m-d" }} → {{ stmt.period_end|date:"Y-m-d" }}</h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>{{ stmt.reconciled_lines_count }} / {{ stmt.total_lines_count }} lines reconciled</div>
+  </div>
+</section>
+
+<!-- Balance check strip -->
+<section class="kpi-row">
+  <div class="kpi">
+    <div class="label">Opening per bank</div>
+    <div class="value">{{ stmt.opening_balance|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Inflows (CSV)</div>
+    <div class="value">+{{ stmt.total_inflow|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Outflows (CSV)</div>
+    <div class="value">−{{ stmt.total_outflow|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Computed closing</div>
+    <div class="value">{{ stmt.computed_closing|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Per bank closing</div>
+    <div class="value">{{ stmt.closing_balance|floatformat:0|intcomma }}</div>
+  </div>
+</section>
+
+<!-- Lines table -->
+<div class="overflow-x-auto">
+<table class="dt">
+  <thead>
+    <tr>
+      <th style="width: 110px;">Date</th>
+      <th>Description</th>
+      <th style="width: 110px;">Reference</th>
+      <th class="num" style="width: 130px;">Amount</th>
+      <th style="width: 110px;">State</th>
+      <th style="width: 200px;">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in lines %}
+    <tr>
+      <td class="mono">{{ l.transaction_date|date:"Y-m-d" }}</td>
+      <td>
+        <div class="text-neutral-950">{{ l.description }}</div>
+        {% if l.state == "matched" and l.matched_entry_line %}
+          <div class="text-xs text-neutral-500 mt-0.5">
+            ↳ Matched to <a href="/admin/accounting/journalentry/{{ l.matched_entry_line.entry_id }}/change/" class="underline underline-offset-2 hover:text-neutral-700 text-mono">{{ l.matched_entry_line.entry.name }}</a>
+          </div>
+        {% elif l.state == "posted" and l.generated_entry %}
+          <div class="text-xs text-neutral-500 mt-0.5">
+            ↳ Posted as <a href="/admin/accounting/journalentry/{{ l.generated_entry_id }}/change/" class="underline underline-offset-2 hover:text-neutral-700 text-mono">{{ l.generated_entry.name }}</a>
+          </div>
+        {% endif %}
+      </td>
+      <td class="mono text-xs text-neutral-500">{{ l.reference|default:"—" }}</td>
+      <td class="num {% if l.is_outflow %}num-neg{% else %}num-pos{% endif %}">{{ l.amount|floatformat:0|intcomma }}</td>
+      <td>
+        {% if l.state == "unmatched" %}<span class="pill pill-warning">Unmatched</span>
+        {% elif l.state == "matched" %}<span class="pill pill-success">Matched</span>
+        {% else %}<span class="pill pill-success">Posted</span>{% endif %}
+      </td>
+      <td>
+        {% if l.state == "unmatched" %}
+          <div class="flex items-center gap-2 text-xs">
+            <a href="{% url 'accounting:bank_line_match' pk=l.id %}" class="btn btn-secondary text-xs">
+              Match{% if l.candidate_count %} <span class="text-neutral-500">({{ l.candidate_count }})</span>{% endif %}
+            </a>
+            <a href="/admin/accounting/journalentry/add/?journal={{ stmt.journal.id }}&date={{ l.transaction_date|date:'Y-m-d' }}" class="text-neutral-500 underline underline-offset-2 hover:text-neutral-700">Post</a>
+          </div>
+        {% elif l.state == "matched" %}
+          <form method="post" action="{% url 'accounting:bank_line_unmatch' pk=l.id %}" class="inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-ghost text-xs">Undo match</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if not lines %}
+<div class="empty">This statement has no lines.</div>
+{% endif %}
+
+{% endblock %}

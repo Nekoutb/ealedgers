@@ -17,6 +17,8 @@ from django.test.utils import override_settings
 from accounting.middleware import TenantContextMiddleware
 from accounting.models import (
     Account,
+    BankStatement,
+    BankStatementLine,
     Currency,
     CustomerInvoice,
     CustomerInvoiceLine,
@@ -27,6 +29,7 @@ from accounting.models import (
     Partner,
     SupplierBill,
     SupplierBillLine,
+    parse_bank_csv,
     Tenant,
 )
 
@@ -1087,3 +1090,408 @@ class SupplierBillTenantIsolationTests(TestCase):
         b_b.number = "BILL/00001"
         b_b.save()  # Should succeed — per-tenant uniqueness
         self.assertEqual(b_a.number, b_b.number)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.3 — Bank reconciliation
+# ---------------------------------------------------------------------------
+
+
+class BankCSVParseTests(TestCase):
+    """The CSV parser handles the formats real banks emit."""
+
+    def test_parses_simple_csv(self):
+        csv = (
+            "date,description,amount,reference\n"
+            "2026-05-10,Wire from ACME,1073250,WIRE-001\n"
+            "2026-05-11,Bank fee,-2500,\n"
+        )
+        rows = parse_bank_csv(csv)
+        self.assertEqual(len(rows), 2)
+        ok = [r for r, e in rows if e is None]
+        self.assertEqual(len(ok), 2)
+        self.assertEqual(ok[0]["transaction_date"], date(2026, 5, 10))
+        self.assertEqual(ok[0]["amount"], Decimal("1073250"))
+        self.assertEqual(ok[0]["reference"], "WIRE-001")
+        self.assertEqual(ok[1]["amount"], Decimal("-2500"))
+
+    def test_parses_semicolon_delimiter(self):
+        csv = (
+            "Date;Description;Amount\n"
+            "10/05/2026;Wire in;1 234 567,89\n"
+        )
+        rows = parse_bank_csv(csv)
+        ok = [r for r, e in rows if e is None]
+        self.assertEqual(len(ok), 1)
+        self.assertEqual(ok[0]["transaction_date"], date(2026, 5, 10))
+        # 1 234 567,89 → spaces stripped, comma → dot → 1234567.89
+        self.assertEqual(ok[0]["amount"], Decimal("1234567.89"))
+
+    def test_parses_french_columns(self):
+        csv = (
+            "Date;Libellé;Montant;Référence\n"
+            "15-05-2026;Virement;500.00;VIR-42\n"
+        )
+        rows = parse_bank_csv(csv)
+        ok = [r for r, e in rows if e is None]
+        self.assertEqual(len(ok), 1)
+        self.assertEqual(ok[0]["transaction_date"], date(2026, 5, 15))
+        self.assertEqual(ok[0]["amount"], Decimal("500.00"))
+        self.assertEqual(ok[0]["reference"], "VIR-42")
+
+    def test_rejects_missing_required_columns(self):
+        csv = "foo,bar\n1,2\n"
+        with self.assertRaises(ValueError):
+            parse_bank_csv(csv)
+
+    def test_collects_per_row_errors(self):
+        csv = (
+            "date,description,amount\n"
+            "2026-05-10,OK,100\n"
+            "not-a-date,BAD,200\n"
+        )
+        rows = parse_bank_csv(csv)
+        self.assertEqual(len(rows), 2)
+        self.assertIsNone(rows[0][1])
+        self.assertIsNotNone(rows[1][1])
+        self.assertIn("date", rows[1][1].lower())
+
+
+class BankReconciliationTests(TestCase):
+    """End-to-end: import, candidate-match, manual match, unmatch."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_bank", "a@a.test", "x")
+        cls.tenant = _make_tenant("bank-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+
+        cls.acct_bank = Account.objects.create(
+            tenant=cls.tenant, code="521000", name="Bank A/C",
+            type="asset_cash", reconcile=True,
+        )
+        cls.acct_ar = Account.objects.create(
+            tenant=cls.tenant, code="411100", name="Customers",
+            type="receivable", reconcile=True,
+        )
+        cls.acct_exp = Account.objects.create(
+            tenant=cls.tenant, code="627000", name="Bank fees", type="expense",
+        )
+        cls.partner = Partner.objects.create(
+            tenant=cls.tenant, name="Sample Customer", partner_type="customer",
+        )
+        cls.bank = Journal.objects.create(
+            tenant=cls.tenant, code="BNK", name="Bank", type="bank",
+            default_account=cls.acct_bank,
+            sequence_prefix="BNK/", next_sequence=1,
+        )
+        cls.gen = Journal.objects.create(
+            tenant=cls.tenant, code="OD", name="Misc", type="general",
+            sequence_prefix="OD/", next_sequence=1,
+        )
+
+    def _make_statement(self):
+        return BankStatement.objects.create(
+            tenant=self.tenant, journal=self.bank,
+            period_start=date(2026, 5, 1), period_end=date(2026, 5, 31),
+            opening_balance=Decimal("0"), closing_balance=Decimal("100000"),
+            imported_by=self.alice,
+        )
+
+    def _post_je(self, amount_to_bank, *, when=date(2026, 5, 10)):
+        """Post a JE that has a bank-side line (debit if amount_to_bank > 0).
+        The non-bank side uses receivable (which requires a partner) or
+        expense (which doesn't), depending on direction."""
+        je = JournalEntry.objects.create(
+            tenant=self.tenant, journal=self.gen, date=when,
+            ref=f"test JE for {amount_to_bank}",
+        )
+        if amount_to_bank > 0:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=je, account=self.acct_bank,
+                debit=amount_to_bank, credit=Decimal("0"),
+            )
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=je, account=self.acct_ar,
+                partner=self.partner,
+                debit=Decimal("0"), credit=amount_to_bank,
+            )
+        else:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=je, account=self.acct_bank,
+                debit=Decimal("0"), credit=abs(amount_to_bank),
+            )
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=je, account=self.acct_exp,
+                debit=abs(amount_to_bank), credit=Decimal("0"),
+            )
+        je.post()
+        return je
+
+    # --- candidates -------------------------------------------------------
+
+    def test_candidates_inflow_finds_matching_debit(self):
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire in", amount=Decimal("50000"),
+        )
+        cands = list(line.candidate_entry_lines())
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].debit, Decimal("50000"))
+
+    def test_candidates_outflow_finds_matching_credit(self):
+        je = self._post_je(Decimal("-2500"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 10),
+            description="Bank fee", amount=Decimal("-2500"),
+        )
+        cands = list(line.candidate_entry_lines())
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0].credit, Decimal("2500"))
+
+    def test_candidates_excludes_lines_outside_date_window(self):
+        self._post_je(Decimal("50000"), when=date(2026, 4, 1))  # too old
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Late wire", amount=Decimal("50000"),
+        )
+        self.assertEqual(line.candidate_entry_lines().count(), 0)
+
+    def test_candidates_excludes_unposted_entries(self):
+        je = JournalEntry.objects.create(
+            tenant=self.tenant, journal=self.gen, date=date(2026, 5, 10),
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=je, account=self.acct_bank,
+            debit=Decimal("50000"), credit=Decimal("0"),
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=je, account=self.acct_ar,
+            partner=self.partner,
+            debit=Decimal("0"), credit=Decimal("50000"),
+        )
+        # NOT posted — still draft
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        self.assertEqual(line.candidate_entry_lines().count(), 0)
+
+    # --- match_to() --------------------------------------------------------
+
+    def test_match_to_succeeds_and_updates_statement_state(self):
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        target = je.lines.get(account=self.acct_bank)
+        line.match_to(target, user=self.alice)
+        line.refresh_from_db()
+        stmt.refresh_from_db()
+        self.assertEqual(line.state, "matched")
+        self.assertEqual(line.matched_entry_line_id, target.id)
+        self.assertEqual(stmt.state, "reconciled")  # only 1 line, fully done
+
+    def test_match_to_rejects_wrong_account(self):
+        from django.core.exceptions import ValidationError
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        # AR side of the JE is on a different account
+        ar_line = je.lines.get(account=self.acct_ar)
+        with self.assertRaises(ValidationError):
+            line.match_to(ar_line, user=self.alice)
+
+    def test_match_to_rejects_amount_mismatch(self):
+        from django.core.exceptions import ValidationError
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("60000"),  # different
+        )
+        target = je.lines.get(account=self.acct_bank)
+        with self.assertRaises(ValidationError):
+            line.match_to(target, user=self.alice)
+
+    def test_match_to_prevents_double_match(self):
+        from django.core.exceptions import ValidationError
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        l1 = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire 1", amount=Decimal("50000"),
+        )
+        l2 = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=20,
+            transaction_date=date(2026, 5, 12),
+            description="Wire 2", amount=Decimal("50000"),
+        )
+        target = je.lines.get(account=self.acct_bank)
+        l1.match_to(target, user=self.alice)
+        with self.assertRaises(ValidationError):
+            l2.match_to(target, user=self.alice)
+
+    def test_unmatch_reverses_match(self):
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        target = je.lines.get(account=self.acct_bank)
+        line.match_to(target, user=self.alice)
+        line.unmatch()
+        line.refresh_from_db()
+        self.assertEqual(line.state, "unmatched")
+        self.assertIsNone(line.matched_entry_line)
+
+    # --- statement state tracking -----------------------------------------
+
+    def test_partial_match_sets_in_progress(self):
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=20,
+            transaction_date=date(2026, 5, 12),
+            description="Other", amount=Decimal("-1000"),
+        )
+        # Match the first line only
+        target = je.lines.get(account=self.acct_bank)
+        stmt.lines.first().match_to(target, user=self.alice)
+        stmt.refresh_from_db()
+        self.assertEqual(stmt.state, "in_progress")
+
+    # --- views ------------------------------------------------------------
+
+    def test_statement_list_view_renders(self):
+        self._make_statement()
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/bank/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.context["statements"]), 1)
+
+    def test_statement_detail_view_renders(self):
+        stmt = self._make_statement()
+        BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Some wire", amount=Decimal("50000"),
+        )
+        self.client.force_login(self.alice)
+        r = self.client.get(f"/accounting/bank/{stmt.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Some wire")
+
+    def test_import_view_creates_statement_and_lines(self):
+        self.client.force_login(self.alice)
+        csv = (
+            "date,description,amount\n"
+            "2026-05-10,Wire in,50000\n"
+            "2026-05-11,Bank fee,-2500\n"
+        )
+        r = self.client.post("/accounting/bank/import/", {
+            "journal_id": self.bank.id,
+            "period_start": "2026-05-01",
+            "period_end": "2026-05-31",
+            "opening_balance": "0",
+            "closing_balance": "47500",
+            "csv_text": csv,
+        })
+        self.assertEqual(r.status_code, 302)
+        stmt = BankStatement.objects.for_tenant(self.tenant).first()
+        self.assertEqual(stmt.lines.count(), 2)
+        self.assertEqual(stmt.computed_closing, Decimal("47500"))
+
+    def test_match_view_get_lists_candidates(self):
+        self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        self.client.force_login(self.alice)
+        r = self.client.get(f"/accounting/bank/line/{line.id}/match/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.context["candidates"]), 1)
+
+    def test_match_view_post_performs_match(self):
+        je = self._post_je(Decimal("50000"))
+        stmt = self._make_statement()
+        line = BankStatementLine.objects.create(
+            tenant=self.tenant, statement=stmt, sequence=10,
+            transaction_date=date(2026, 5, 11),
+            description="Wire", amount=Decimal("50000"),
+        )
+        target = je.lines.get(account=self.acct_bank)
+        self.client.force_login(self.alice)
+        r = self.client.post(
+            f"/accounting/bank/line/{line.id}/match/",
+            {"entry_line_id": target.id},
+        )
+        self.assertEqual(r.status_code, 302)
+        line.refresh_from_db()
+        self.assertEqual(line.state, "matched")
+
+
+class BankStatementTenantIsolationTests(TestCase):
+    """Bank statements are tenant-scoped."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_bx", "a@a.test", "x")
+        cls.bob = User.objects.create_superuser("bob_bx", "b@b.test", "x")
+        cls.acme = _make_tenant("acme-bx", currency=cls.xaf, owner=cls.alice)
+        cls.beta = _make_tenant("beta-bx", currency=cls.xaf, owner=cls.bob)
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
+
+        cls.j_a = Journal.objects.create(tenant=cls.acme, code="BNK", name="Bank", type="bank")
+        cls.j_b = Journal.objects.create(tenant=cls.beta, code="BNK", name="Bank", type="bank")
+        BankStatement.objects.create(
+            tenant=cls.acme, journal=cls.j_a,
+            period_start=date(2026, 5, 1), period_end=date(2026, 5, 31),
+        )
+        BankStatement.objects.create(
+            tenant=cls.beta, journal=cls.j_b,
+            period_start=date(2026, 5, 1), period_end=date(2026, 5, 31),
+        )
+
+    def test_for_tenant_filters(self):
+        self.assertEqual(BankStatement.objects.for_tenant(self.acme).count(), 1)
+        self.assertEqual(BankStatement.objects.for_tenant(self.beta).count(), 1)
+
+    def test_list_view_filters_by_tenant(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/bank/")
+        self.assertEqual(len(r.context["statements"]), 1)
+        self.assertEqual(r.context["statements"][0].tenant, self.acme)

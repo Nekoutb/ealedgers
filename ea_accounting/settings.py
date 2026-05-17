@@ -57,6 +57,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Resolves request.tenant from the authenticated user's session/membership.
+    # MUST come after AuthenticationMiddleware (needs request.user).
+    'accounting.middleware.TenantContextMiddleware',
 ]
 
 ROOT_URLCONF = 'ea_accounting.urls'

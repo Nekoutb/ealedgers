@@ -25,6 +25,8 @@ from accounting.models import (
     JournalEntryLine,
     Membership,
     Partner,
+    SupplierBill,
+    SupplierBillLine,
     Tenant,
 )
 
@@ -823,3 +825,265 @@ class CustomerInvoiceTenantIsolationTests(TestCase):
         inv_b.save()  # Should succeed — per-tenant uniqueness
         self.assertEqual(inv_a.number, inv_b.number)
         self.assertNotEqual(inv_a.tenant_id, inv_b.tenant_id)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.2 — Supplier bills
+# ---------------------------------------------------------------------------
+
+
+class SupplierBillTests(TestCase):
+    """Bill lifecycle: draft → posted → paid, including buy-side WHT math."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_bill", "a@a.test", "x")
+        cls.tenant = _make_tenant("bill-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+
+        cls.acct_ap = Account.objects.create(
+            tenant=cls.tenant, code="401100", name="Vendors", type="payable", reconcile=True,
+        )
+        cls.acct_exp = Account.objects.create(
+            tenant=cls.tenant, code="604000", name="Services purchased", type="expense",
+        )
+        cls.acct_vat = Account.objects.create(
+            tenant=cls.tenant, code="4451", name="VAT recoverable", type="asset_current",
+        )
+        cls.acct_wht_pay = Account.objects.create(
+            tenant=cls.tenant, code="4424", name="WHT payable to gov", type="liability_current",
+        )
+        cls.acct_bank = Account.objects.create(
+            tenant=cls.tenant, code="521000", name="Bank A/C", type="asset_cash", reconcile=True,
+        )
+
+        cls.purch = Journal.objects.create(
+            tenant=cls.tenant, code="ACH", name="Purchases", type="purchase",
+            sequence_prefix="BILL/", next_sequence=1,
+        )
+        cls.bank = Journal.objects.create(
+            tenant=cls.tenant, code="BNK", name="Bank", type="bank",
+            default_account=cls.acct_bank, sequence_prefix="BNK/", next_sequence=1,
+        )
+
+        cls.vendor = Partner.objects.create(
+            tenant=cls.tenant, name="Acme Vendor", partner_type="vendor",
+            account_payable=cls.acct_ap,
+        )
+
+    def _make_bill(self, *, wht=Decimal("0"), tax=Decimal("0"), qty=1, price=Decimal("50000")):
+        bill = SupplierBill.objects.create(
+            tenant=self.tenant,
+            partner=self.vendor,
+            journal=self.purch,
+            currency=self.xaf,
+            date=date(2026, 5, 17),
+            due_date=date(2026, 6, 16),
+            vendor_reference="VND-001",
+            withholding_tax_rate=wht,
+        )
+        SupplierBillLine.objects.create(
+            tenant=self.tenant, bill=bill, sequence=10,
+            description="Office supplies", account=self.acct_exp,
+            quantity=Decimal(qty), unit_price=price, tax_rate=tax,
+        )
+        bill.recompute_amounts()
+        return bill
+
+    # ----- amounts --------------------------------------------------------
+
+    def test_amounts_no_tax_no_wht(self):
+        bill = self._make_bill()
+        self.assertEqual(bill.amount_subtotal, Decimal("50000.00"))
+        self.assertEqual(bill.amount_total, Decimal("50000.00"))
+        self.assertEqual(bill.amount_net_payable, Decimal("50000.00"))
+
+    def test_amounts_with_vat(self):
+        bill = self._make_bill(tax=Decimal("19.25"))
+        self.assertEqual(bill.amount_tax, Decimal("9625.00"))
+        self.assertEqual(bill.amount_total, Decimal("59625.00"))
+
+    def test_amounts_with_wht(self):
+        bill = self._make_bill(wht=Decimal("5.5"))
+        self.assertEqual(bill.amount_total, Decimal("50000.00"))
+        self.assertEqual(bill.amount_withholding, Decimal("2750.00"))
+        self.assertEqual(bill.amount_net_payable, Decimal("47250.00"))
+
+    # ----- post() ---------------------------------------------------------
+
+    def test_post_creates_balanced_entry_no_tax(self):
+        bill = self._make_bill()
+        bill.post()
+        self.assertEqual(bill.state, "posted")
+        je = bill.journal_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 604 50000 / Cr 401 50000
+        debits = list(je.lines.filter(debit__gt=0).values_list("account__code", "debit"))
+        credits = list(je.lines.filter(credit__gt=0).values_list("account__code", "credit"))
+        self.assertEqual(debits, [("604000", Decimal("50000.00"))])
+        self.assertEqual(credits, [("401100", Decimal("50000.00"))])
+
+    def test_post_creates_vat_recoverable(self):
+        bill = self._make_bill(tax=Decimal("19.25"))
+        bill.post()
+        je = bill.journal_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 604 50000 + Dr 4451 9625 / Cr 401 59625
+        exp_debit = je.lines.get(account=self.acct_exp).debit
+        vat_debit = je.lines.get(account=self.acct_vat).debit
+        ap_credit = je.lines.get(account=self.acct_ap).credit
+        self.assertEqual(exp_debit, Decimal("50000.00"))
+        self.assertEqual(vat_debit, Decimal("9625.00"))
+        self.assertEqual(ap_credit, Decimal("59625.00"))
+
+    def test_post_splits_wht_to_payable(self):
+        bill = self._make_bill(wht=Decimal("5.5"))
+        bill.post()
+        je = bill.journal_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 604 50000 / Cr 401 47250 + Cr 4424 2750
+        exp_debit = je.lines.get(account=self.acct_exp).debit
+        ap_credit = je.lines.get(account=self.acct_ap).credit
+        wht_credit = je.lines.get(account=self.acct_wht_pay).credit
+        self.assertEqual(exp_debit, Decimal("50000.00"))
+        self.assertEqual(ap_credit, Decimal("47250.00"))
+        self.assertEqual(wht_credit, Decimal("2750.00"))
+
+    def test_post_assigns_number_from_journal_sequence(self):
+        bill = self._make_bill()
+        self.assertEqual(bill.number, "")
+        bill.post()
+        self.assertTrue(bill.number.startswith("BILL/"))
+
+    def test_post_rejects_empty_bill(self):
+        from django.core.exceptions import ValidationError
+        bill = SupplierBill.objects.create(
+            tenant=self.tenant, partner=self.vendor, journal=self.purch,
+            currency=self.xaf, date=date.today(), due_date=date.today(),
+        )
+        with self.assertRaises(ValidationError):
+            bill.post()
+
+    def test_post_idempotent(self):
+        bill = self._make_bill()
+        bill.post()
+        number = bill.number
+        bill.post()
+        bill.refresh_from_db()
+        self.assertEqual(bill.number, number)
+
+    # ----- record_payment() ----------------------------------------------
+
+    def test_record_payment_balanced(self):
+        bill = self._make_bill(wht=Decimal("5.5"))
+        bill.post()
+        bill.record_payment(self.bank)
+        self.assertEqual(bill.state, "paid")
+        je = bill.payment_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 401 47250 / Cr Bank 47250
+        ap_debit = je.lines.get(account=self.acct_ap).debit
+        bank_credit = je.lines.get(account=self.acct_bank).credit
+        self.assertEqual(ap_debit, Decimal("47250.00"))
+        self.assertEqual(bank_credit, Decimal("47250.00"))
+
+    def test_record_payment_rejects_draft(self):
+        from django.core.exceptions import ValidationError
+        bill = self._make_bill()
+        with self.assertRaises(ValidationError):
+            bill.record_payment(self.bank)
+
+    def test_cancel_only_draft(self):
+        from django.core.exceptions import ValidationError
+        bill = self._make_bill()
+        bill.post()
+        with self.assertRaises(ValidationError):
+            bill.cancel()
+
+    # ----- views ----------------------------------------------------------
+
+    def test_bill_list_renders(self):
+        self._make_bill()
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/bills/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.context["bills"]), 1)
+
+    def test_bill_detail_renders(self):
+        bill = self._make_bill()
+        self.client.force_login(self.alice)
+        r = self.client.get(f"/accounting/bills/{bill.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Acme Vendor")
+        self.assertContains(r, "Office supplies")
+
+    def test_bill_post_view_transitions(self):
+        bill = self._make_bill()
+        self.client.force_login(self.alice)
+        r = self.client.post(f"/accounting/bills/{bill.id}/post/")
+        self.assertEqual(r.status_code, 302)
+        bill.refresh_from_db()
+        self.assertEqual(bill.state, "posted")
+
+    def test_bill_payment_view_transitions(self):
+        bill = self._make_bill()
+        bill.post()
+        self.client.force_login(self.alice)
+        r = self.client.post(
+            f"/accounting/bills/{bill.id}/pay/",
+            {"journal_id": self.bank.id},
+        )
+        self.assertEqual(r.status_code, 302)
+        bill.refresh_from_db()
+        self.assertEqual(bill.state, "paid")
+
+
+class SupplierBillTenantIsolationTests(TestCase):
+    """Bills are tenant-scoped — no cross-tenant leakage."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_b", "a@a.test", "x")
+        cls.bob = User.objects.create_superuser("bob_b", "b@b.test", "x")
+        cls.acme = _make_tenant("acme-b", currency=cls.xaf, owner=cls.alice)
+        cls.beta = _make_tenant("beta-b", currency=cls.xaf, owner=cls.bob)
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
+
+        cls.j_a = Journal.objects.create(tenant=cls.acme, code="ACH", name="Purch", type="purchase")
+        cls.j_b = Journal.objects.create(tenant=cls.beta, code="ACH", name="Purch", type="purchase")
+        cls.v_a = Partner.objects.create(tenant=cls.acme, name="ACME-VEND", partner_type="vendor")
+        cls.v_b = Partner.objects.create(tenant=cls.beta, name="BETA-VEND", partner_type="vendor")
+
+        SupplierBill.objects.create(
+            tenant=cls.acme, partner=cls.v_a, journal=cls.j_a, currency=cls.xaf,
+            date=date.today(), due_date=date.today(),
+        )
+        SupplierBill.objects.create(
+            tenant=cls.beta, partner=cls.v_b, journal=cls.j_b, currency=cls.xaf,
+            date=date.today(), due_date=date.today(),
+        )
+
+    def test_for_tenant_filters(self):
+        self.assertEqual(SupplierBill.objects.for_tenant(self.acme).count(), 1)
+        self.assertEqual(SupplierBill.objects.for_tenant(self.beta).count(), 1)
+
+    def test_bill_list_view_filters_by_tenant(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/bills/")
+        body = r.content.decode("utf-8", errors="replace")
+        self.assertIn("ACME-VEND", body)
+        self.assertNotIn("BETA-VEND", body)
+
+    def test_bill_number_unique_within_tenant_but_not_across(self):
+        b_a = SupplierBill.objects.filter(tenant=self.acme).first()
+        b_b = SupplierBill.objects.filter(tenant=self.beta).first()
+        b_a.number = "BILL/00001"
+        b_a.save()
+        b_b.number = "BILL/00001"
+        b_b.save()  # Should succeed — per-tenant uniqueness
+        self.assertEqual(b_a.number, b_b.number)

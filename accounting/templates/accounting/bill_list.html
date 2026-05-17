@@ -1,0 +1,84 @@
+{% extends "accounting/_app_base.html" %}
+{% load humanize %}
+
+{% block page_title %}Vendor Bills{% endblock %}
+
+{% block content %}
+
+<section class="page-head">
+  <div>
+    <p class="text-eyebrow mb-2">Vendor Bills</p>
+    <h1 class="h-display">Bills</h1>
+  </div>
+  <div class="meta">
+    <div><strong>{{ tenant_name }}</strong></div>
+    <div>To pay: <span class="text-mono">{{ outstanding|floatformat:0|intcomma }} XAF</span></div>
+  </div>
+</section>
+
+<!-- Filter bar -->
+<div class="flex flex-wrap items-center gap-2 mb-6">
+  <a href="?" class="pill {% if not active_state %}pill-success{% else %}pill-neutral{% endif %}">All <span class="ml-1 opacity-70">{{ counts.all }}</span></a>
+  <a href="?state=draft" class="pill {% if active_state == 'draft' %}pill-success{% else %}pill-neutral{% endif %}">Draft <span class="ml-1 opacity-70">{{ counts.draft }}</span></a>
+  <a href="?state=posted" class="pill {% if active_state == 'posted' %}pill-success{% else %}pill-neutral{% endif %}">Posted <span class="ml-1 opacity-70">{{ counts.posted }}</span></a>
+  <a href="?state=paid" class="pill {% if active_state == 'paid' %}pill-success{% else %}pill-neutral{% endif %}">Paid <span class="ml-1 opacity-70">{{ counts.paid }}</span></a>
+  <a href="?state=cancelled" class="pill {% if active_state == 'cancelled' %}pill-success{% else %}pill-neutral{% endif %}">Cancelled <span class="ml-1 opacity-70">{{ counts.cancelled }}</span></a>
+
+  <div class="ml-auto">
+    <a href="/admin/accounting/supplierbill/add/" class="btn btn-primary text-xs">
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      New bill
+    </a>
+  </div>
+</div>
+
+{% if bills %}
+<div class="overflow-x-auto">
+<table class="dt">
+  <thead>
+    <tr>
+      <th style="width: 130px;">Number</th>
+      <th style="width: 110px;">Date</th>
+      <th>Vendor</th>
+      <th style="width: 120px;">Vendor ref</th>
+      <th style="width: 110px;">Due</th>
+      <th class="num">Subtotal</th>
+      <th class="num">Tax</th>
+      <th class="num">WHT</th>
+      <th class="num">Total</th>
+      <th style="width: 110px;">State</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for bill in bills %}
+    <tr>
+      <td class="mono"><a href="{% url 'accounting:bill_detail' pk=bill.id %}" class="font-semibold text-neutral-950 underline underline-offset-2 hover:text-neutral-700">{{ bill.number|default:"(draft)" }}</a></td>
+      <td class="mono">{{ bill.date|date:"Y-m-d" }}</td>
+      <td>{{ bill.partner.name }}</td>
+      <td class="mono text-neutral-500">{{ bill.vendor_reference|default:"—" }}</td>
+      <td class="mono">{{ bill.due_date|date:"Y-m-d" }}</td>
+      <td class="num">{{ bill.amount_subtotal|floatformat:0|intcomma }}</td>
+      <td class="num">{{ bill.amount_tax|floatformat:0|intcomma }}</td>
+      <td class="num">{{ bill.amount_withholding|floatformat:0|intcomma }}</td>
+      <td class="num font-semibold text-neutral-950">{{ bill.amount_total|floatformat:0|intcomma }}</td>
+      <td>
+        {% if bill.state == "draft" %}<span class="pill pill-draft">Draft</span>
+        {% elif bill.state == "posted" %}<span class="pill pill-warning">Posted</span>
+        {% elif bill.state == "paid" %}<span class="pill pill-success">Paid</span>
+        {% else %}<span class="pill pill-danger">Cancelled</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">
+  No bills yet.<br>
+  <a href="/admin/accounting/supplierbill/add/">Enter your first bill</a>.
+</div>
+{% endif %}
+
+{% endblock %}

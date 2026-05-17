@@ -36,7 +36,7 @@ NAV = [
 
     _menu("Vendors", groups=[
         _group([
-            _item("Bills"),
+            _item("Bills", "/accounting/bills/"),
             _item("Refunds"),
             _item("Payments"),
             _item("Products"),

@@ -21,4 +21,11 @@ urlpatterns = [
     path("invoices/<int:pk>/post/", views.invoice_post, name="invoice_post"),
     path("invoices/<int:pk>/pay/", views.invoice_record_payment, name="invoice_record_payment"),
     path("invoices/<int:pk>/cancel/", views.invoice_cancel, name="invoice_cancel"),
+
+    # Supplier bills (Phase 1.2)
+    path("bills/", views.bill_list, name="bill_list"),
+    path("bills/<int:pk>/", views.bill_detail, name="bill_detail"),
+    path("bills/<int:pk>/post/", views.bill_post, name="bill_post"),
+    path("bills/<int:pk>/pay/", views.bill_record_payment, name="bill_record_payment"),
+    path("bills/<int:pk>/cancel/", views.bill_cancel, name="bill_cancel"),
 ]

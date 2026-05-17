@@ -1,303 +1,82 @@
-<!DOCTYPE html>
-{% load humanize %}
+{% load static humanize %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block page_title %}{{ page_name|default:"Accounting" }}{% endblock %} · EA Ledgers</title>
 
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%231A1815'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
 
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-
-:root {
-  --bg: #F5F2EA;
-  --surface: #FFFFFF;
-  --ink: #1A1815;
-  --muted: #6E6862;
-  --hairline: #E2DCD0;
-  --soft: #ECE8DC;
-  --header-bg: #1A1815;
-  --header-fg: #F5F2EA;
-  --emerald: #0B6E4F;
-  --emerald-dk: #084D37;
-  --emerald-soft: #E1EFE8;
-  --terracotta: #C0563A;
-  --mustard: #D49B1A;
-  --plum: #7B3F71;
-  --rose: #C2526D;
-  --denim: #2E4A6B;
-  --teal: #2E8B8E;
-  --orange: #E07B30;
-  --font-display: 'Fraunces', 'Times New Roman', serif;
-  --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.35;
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-a { color: inherit; text-decoration: none; }
-a:hover { color: var(--emerald); }
-
-/* ============ TOP HEADER ============ */
-.topbar {
-  background: var(--header-bg);
-  color: var(--header-fg);
-  padding: 14px 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  position: relative;
-  z-index: 5;
-}
-.topbar .brand { display: flex; align-items: center; gap: 14px; color: var(--header-fg); }
-.topbar .brand:hover { color: var(--header-fg); }
-.topbar .brand .mark { width: 22px; height: auto; }
-.topbar .brand .name {
-  font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; font-size: 13px;
-}
-.topbar .brand .product {
-  font-family: var(--font-display); font-style: italic; font-weight: 300;
-  font-size: 17px; color: rgba(245, 242, 234, 0.65);
-  font-variation-settings: 'opsz' 18;
-}
-.crew { display: flex; align-items: center; gap: 18px; font-size: 12px; }
-.tenant {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 7px 14px 7px 12px;
-  border: 1px solid rgba(245, 242, 234, 0.25);
-  border-radius: 100px;
-  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500;
-}
-.tenant::before {
-  content: ''; width: 6px; height: 6px; background: var(--emerald); border-radius: 50%;
-}
-.user-name { font-weight: 500; letter-spacing: 0.08em; }
-.logout {
-  background: transparent;
-  border: 1px solid rgba(245, 242, 234, 0.3);
-  color: var(--header-fg);
-  font-family: var(--font-sans);
-  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 600;
-  padding: 7px 14px; cursor: pointer;
-  transition: background 0.18s, color 0.18s;
-}
-.logout:hover { background: var(--header-fg); color: var(--header-bg); }
-
-/* Nav CSS is loaded from accounting/_nav_styles.html as a separate <style> block */
-
-/* ============ MAIN STAGE ============ */
-.stage {
-  position: relative;
-  z-index: 1;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 40px 32px 80px;
-  width: 100%;
-}
-.page-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 32px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--hairline);
-}
-.page-head .eyebrow {
-  font-size: 11px; letter-spacing: 0.26em; text-transform: uppercase;
-  color: var(--muted); font-weight: 600; margin-bottom: 10px;
-}
-.page-head h1 {
-  font-family: var(--font-display);
-  font-weight: 350;
-  font-size: clamp(36px, 5vw, 56px);
-  line-height: 1.0;
-  letter-spacing: -0.025em;
-  color: var(--ink);
-  font-variation-settings: 'opsz' 144;
-}
-.page-head h1 em { font-style: italic; font-weight: 350; }
-.page-head .meta {
-  text-align: right; font-size: 11px;
-  color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase;
-  font-family: var(--font-mono);
-}
-.page-head .meta strong { color: var(--ink); font-weight: 600; }
-
-/* ============ COMMON COMPONENTS ============ */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  padding: 24px;
-}
-.card.accent { border-left: 4px solid var(--emerald); }
-
-.kpi-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-  margin-bottom: 32px;
-}
-.kpi {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  padding: 18px 20px;
-}
-.kpi .label {
-  font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
-  color: var(--muted); font-weight: 600;
-}
-.kpi .value {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: 36px;
-  line-height: 1;
-  margin-top: 8px;
-  color: var(--ink);
-  font-variation-settings: 'opsz' 144;
-}
-
-/* Data table */
-.dt {
-  width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-collapse: collapse;
-}
-.dt thead th {
-  background: #FBF9F3;
-  border-bottom: 1px solid var(--ink);
-  padding: 14px 16px;
-  text-align: left;
-  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
-  font-weight: 700; color: var(--ink);
-}
-.dt thead th.num, .dt tbody td.num { text-align: right; font-family: var(--font-mono); }
-.dt tbody td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--hairline);
-  font-size: 13px;
-  vertical-align: top;
-}
-.dt tbody tr:hover td { background: #FAF8F2; }
-.dt tfoot td {
-  padding: 14px 16px;
-  font-weight: 700;
-  border-top: 2px solid var(--ink);
-  background: #FBF9F3;
-  font-size: 12px;
-}
-.dt tfoot td.num { font-family: var(--font-mono); }
-
-.pill {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 100px;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-weight: 700;
-  background: var(--soft);
-  color: var(--ink);
-}
-.pill.live   { background: var(--emerald-soft); color: var(--emerald); }
-.pill.draft  { background: #F4ECE3; color: #886B3E; }
-.pill.warn   { background: #F7E5DD; color: var(--terracotta); }
-
-.empty {
-  padding: 56px 24px;
-  text-align: center;
-  color: var(--muted);
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  font-size: 18px;
-  background: var(--surface);
-  border: 1px dashed var(--hairline);
-}
-
-/* Mono numeric */
-.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.neg  { color: var(--terracotta); }
-.pos  { color: var(--emerald); }
-
-/* ============ RESPONSIVE ============ */
-@media (max-width: 900px) {
-  .topbar { padding: 12px 16px; flex-wrap: wrap; gap: 10px; }
-  .ea-nav { padding: 0 16px; }
-  .stage { padding: 28px 16px 64px; }
-  .page-head { flex-direction: column; align-items: flex-start; }
-  .page-head .meta { text-align: left; }
-}
-
-@keyframes rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.stage > * { animation: rise 0.5s cubic-bezier(0.2,0.7,0.2,1) both; }
-.stage > *:nth-child(1) { animation-delay: 0.05s; }
-.stage > *:nth-child(2) { animation-delay: 0.10s; }
-.stage > *:nth-child(3) { animation-delay: 0.15s; }
-.stage > *:nth-child(4) { animation-delay: 0.20s; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
-
-{% block extra_css %}{% endblock %}
+  /* Bridge legacy CSS variables consumed by accounting/_nav_styles.html
+     so the shared top-nav skinned by Tailwind tokens without rewriting
+     the partial (which is also pulled in by admin/base_site.html). */
+  :root {
+    --surface: #ffffff;
+    --hairline: #e5e5e5;          /* neutral-200 */
+    --muted: #737373;             /* neutral-500 */
+    --ink: #0a0a0a;               /* neutral-950 */
+    --emerald: #0d9488;           /* color-brand */
+    --emerald-soft: #ccfbf1;      /* color-brand-soft */
+    --font-sans: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
 </style>
 {% include "accounting/_nav_styles.html" %}
+{% block extra_head %}{% endblock %}
 </head>
-<body>
 
-<header class="topbar">
-  <a class="brand" href="/workspace/">
-    <svg class="mark" viewBox="0 0 60 44" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect width="56" height="8"/>
-      <rect y="18" width="36" height="8"/>
-      <rect y="36" width="56" height="8"/>
-    </svg>
-    <span class="name">Elite Advisors</span>
-    <span class="product">EA Ledgers</span>
-  </a>
-  <div class="crew">
-    <span class="tenant">{{ tenant_name|default:"Elite Advisors SARL" }}</span>
-    <span class="user-name">{{ user.username }}</span>
-    <form method="post" action="/admin/logout/" style="display:inline">
-      {% csrf_token %}
-      <button type="submit" class="logout">Log out</button>
-    </form>
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<!-- ============ TOP BAR ============ -->
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+
+    <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+      <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+        <rect width="56" height="8"/>
+        <rect y="18" width="36" height="8"/>
+        <rect y="36" width="56" height="8"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+    </a>
+
+    <div class="flex items-center gap-2">
+      <div class="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-700">
+        <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-brand);"></span>
+        {{ tenant_name|default:"EA Ledgers" }}
+      </div>
+      <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+      <form method="post" action="/admin/logout/">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-ghost text-xs">Sign out</button>
+      </form>
+    </div>
+
   </div>
 </header>
 
+<!-- ============ MODULE NAV ============ -->
 {% include "accounting/_nav.html" %}
 
-<main class="stage">
+<!-- ============ STAGE ============ -->
+<main class="flex-1 max-w-7xl mx-auto w-full px-6 py-10">
 {% block content %}{% endblock %}
 </main>
 
+<!-- ============ FOOTER ============ -->
+<footer class="border-t border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div class="text-mono">v0.2 · OHADA · XAF</div>
+  </div>
+</footer>
+
+{% block extra_css %}{% endblock %}
 </body>
 </html>

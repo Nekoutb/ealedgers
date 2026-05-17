@@ -4,12 +4,11 @@
 {% block page_title %}Dashboard{% endblock %}
 
 {% block content %}
-{% with active_nav="dashboard" %}{% endwith %}
 
 <section class="page-head">
   <div>
-    <div class="eyebrow">Accounting · Fiscal year 2026</div>
-    <h1>Dashboard <em>—</em><br><em>at a glance.</em></h1>
+    <p class="text-eyebrow mb-2">Accounting · Fiscal year 2026</p>
+    <h1 class="h-display">Dashboard</h1>
   </div>
   <div class="meta">
     <div><strong>{{ tenant_name }}</strong></div>
@@ -20,81 +19,80 @@
 <section class="kpi-row">
   <div class="kpi">
     <div class="label">Posted entries</div>
-    <div class="value mono">{{ counters.posted_entries|intcomma }}</div>
+    <div class="value">{{ counters.posted_entries|intcomma }}</div>
   </div>
   <div class="kpi">
     <div class="label">Draft entries</div>
-    <div class="value mono">{{ counters.draft_entries|intcomma }}</div>
+    <div class="value">{{ counters.draft_entries|intcomma }}</div>
   </div>
   <div class="kpi">
     <div class="label">Customers</div>
-    <div class="value mono">{{ counters.customers|intcomma }}</div>
+    <div class="value">{{ counters.customers|intcomma }}</div>
   </div>
   <div class="kpi">
     <div class="label">Suppliers</div>
-    <div class="value mono">{{ counters.suppliers|intcomma }}</div>
+    <div class="value">{{ counters.suppliers|intcomma }}</div>
   </div>
   <div class="kpi">
     <div class="label">Accounts</div>
-    <div class="value mono">{{ counters.accounts_count|intcomma }}</div>
+    <div class="value">{{ counters.accounts_count|intcomma }}</div>
   </div>
   <div class="kpi">
     <div class="label">Fixed assets</div>
-    <div class="value mono">{{ counters.fixed_assets|intcomma }}</div>
+    <div class="value">{{ counters.fixed_assets|intcomma }}</div>
   </div>
 </section>
 
-<section>
-  <h2 style="font-family: var(--font-display); font-weight: 400; font-size: 28px; letter-spacing: -0.015em; margin-bottom: 16px;">
-    Bank &amp; Cash balances
-  </h2>
+<section class="mb-10">
+  <h2 class="h-section mb-4">Bank &amp; Cash balances</h2>
 
   {% if bank_cash_journals %}
-  <div class="bank-grid">
+  <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
     {% for j in bank_cash_journals %}
       <div class="bank-card {% if j.type == 'cash' %}cash{% endif %}">
-        <div class="bank-head">
+        <div class="flex items-start justify-between gap-3">
           <div>
-            <div class="bank-code">{{ j.code }}</div>
-            <div class="bank-name">{{ j.name }}</div>
+            <div class="text-mono text-xs font-semibold text-neutral-500 uppercase tracking-wider">{{ j.code }}</div>
+            <div class="text-base font-semibold text-neutral-950 mt-0.5">{{ j.name }}</div>
           </div>
-          <span class="pill {% if j.type == 'bank' %}live{% else %}draft{% endif %}">{{ j.get_type_display }}</span>
+          <span class="pill {% if j.type == 'bank' %}pill-success{% else %}pill-warning{% endif %}">{{ j.get_type_display }}</span>
         </div>
-        <div class="bank-balance mono">
+        <div class="text-mono text-2xl font-semibold tracking-tight text-neutral-950">
           {{ j.balance|floatformat:0|intcomma }}
-          <span class="bank-ccy">{% if j.currency %}{{ j.currency.code }}{% else %}XAF{% endif %}</span>
+          <span class="text-xs text-neutral-500 ml-1 align-middle font-medium">{% if j.currency %}{{ j.currency.code }}{% else %}XAF{% endif %}</span>
         </div>
-        <div class="bank-meta mono">
+        <div class="text-mono text-xs text-neutral-500">
           {{ j.tx_count|intcomma }} {% if j.tx_count == 1 %}line{% else %}lines{% endif %} posted
-          {% if j.default_account %} · <a href="/admin/accounting/account/{{ j.default_account.id }}/change/" style="text-decoration: underline; text-decoration-thickness: 1px;">{{ j.default_account.code }}</a>{% endif %}
+          {% if j.default_account %} · <a href="/admin/accounting/account/{{ j.default_account.id }}/change/" class="underline underline-offset-2 hover:text-neutral-700">{{ j.default_account.code }}</a>{% endif %}
         </div>
       </div>
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty">No bank or cash journals configured yet.<br>Add one in <a href="/admin/accounting/journal/add/" style="color: var(--emerald); text-decoration: underline;">Settings &rsaquo; Journals</a>.</div>
+  <div class="empty">
+    No bank or cash journals configured yet.<br>
+    Add one in <a href="/admin/accounting/journal/add/">Settings &rsaquo; Journals</a>.
+  </div>
   {% endif %}
 </section>
 
-<section style="margin-top: 48px;">
-  <h2 style="font-family: var(--font-display); font-weight: 400; font-size: 28px; letter-spacing: -0.015em; margin-bottom: 16px;">
-    Quick actions
-  </h2>
-  <div class="action-grid">
+<section>
+  <h2 class="h-section mb-4">Quick actions</h2>
+  <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
     <a class="action-card" href="/admin/accounting/journalentry/add/">
-      <div class="action-icon" style="background: var(--emerald);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="action-icon" style="background: var(--color-brand);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 5v14M5 12h14"/>
         </svg>
       </div>
       <div>
-        <div class="action-name">New journal entry</div>
-        <div class="action-desc">Post a debit/credit transaction</div>
+        <div class="text-sm font-semibold text-neutral-950">New journal entry</div>
+        <div class="text-xs text-neutral-500 mt-0.5">Post a debit/credit transaction</div>
       </div>
     </a>
     <a class="action-card" href="/admin/accounting/partner/add/">
-      <div class="action-icon" style="background: var(--rose);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="action-icon bg-rose-500">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
           <circle cx="9" cy="7" r="4"/>
           <line x1="19" y1="8" x2="19" y2="14"/>
@@ -102,26 +100,26 @@
         </svg>
       </div>
       <div>
-        <div class="action-name">New partner</div>
-        <div class="action-desc">Customer or supplier</div>
+        <div class="text-sm font-semibold text-neutral-950">New partner</div>
+        <div class="text-xs text-neutral-500 mt-0.5">Customer or supplier</div>
       </div>
     </a>
     <a class="action-card" href="/admin/accounting/fixedasset/add/">
-      <div class="action-icon" style="background: var(--mustard);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="action-icon bg-amber-500">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 2L2 7l10 5 10-5z"/>
           <polyline points="2 17 12 22 22 17"/>
           <polyline points="2 12 12 17 22 12"/>
         </svg>
       </div>
       <div>
-        <div class="action-name">New fixed asset</div>
-        <div class="action-desc">Set up depreciation schedule</div>
+        <div class="text-sm font-semibold text-neutral-950">New fixed asset</div>
+        <div class="text-xs text-neutral-500 mt-0.5">Set up depreciation schedule</div>
       </div>
     </a>
     <a class="action-card" href="/accounting/reports/trial-balance/">
-      <div class="action-icon" style="background: var(--orange);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <div class="action-icon bg-indigo-500">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="6" y1="3" x2="6" y2="21"/>
           <line x1="18" y1="3" x2="18" y2="21"/>
           <line x1="3" y1="6" x2="21" y2="6"/>
@@ -129,109 +127,11 @@
         </svg>
       </div>
       <div>
-        <div class="action-name">Trial balance</div>
-        <div class="action-desc">Debits &amp; credits per account</div>
+        <div class="text-sm font-semibold text-neutral-950">Trial balance</div>
+        <div class="text-xs text-neutral-500 mt-0.5">Debits &amp; credits per account</div>
       </div>
     </a>
   </div>
 </section>
 
-{% endblock %}
-
-{% block extra_css %}
-.bank-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-}
-.bank-card {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-left: 4px solid var(--emerald);
-  padding: 20px 22px;
-}
-.bank-card.cash { border-left-color: var(--mustard); }
-.bank-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: start;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.bank-code {
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--muted); letter-spacing: 0.08em;
-  font-weight: 600;
-}
-.bank-name {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: 19px;
-  letter-spacing: -0.01em;
-  margin-top: 2px;
-  font-variation-settings: 'opsz' 144;
-}
-.bank-balance {
-  font-size: 28px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  margin: 8px 0 6px;
-  color: var(--ink);
-}
-.bank-balance .bank-ccy {
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0.12em;
-  margin-left: 6px;
-  font-weight: 500;
-}
-.bank-meta {
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0.02em;
-}
-
-.action-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
-}
-.action-card {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  padding: 16px 18px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-}
-.action-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 20px -10px rgba(26, 24, 21, 0.18);
-  border-color: var(--emerald);
-  color: var(--ink);
-}
-.action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-}
-.action-icon svg { width: 22px; height: 22px; }
-.action-name {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-  line-height: 1.1;
-  font-variation-settings: 'opsz' 144;
-}
-.action-desc {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 4px;
-}
 {% endblock %}

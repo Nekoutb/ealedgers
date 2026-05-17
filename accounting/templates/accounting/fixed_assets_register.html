@@ -4,12 +4,11 @@
 {% block page_title %}Fixed Assets Register{% endblock %}
 
 {% block content %}
-{% with active_nav="fixed_assets_register" %}{% endwith %}
 
 <section class="page-head">
   <div>
-    <div class="eyebrow">Reports · Fixed Assets</div>
-    <h1>Fixed Assets <em>Register.</em></h1>
+    <p class="text-eyebrow mb-2">Reports · Fixed Assets</p>
+    <h1 class="h-display">Fixed Assets Register</h1>
   </div>
   <div class="meta">
     <div><strong>{{ tenant_name }}</strong></div>
@@ -18,6 +17,7 @@
 </section>
 
 {% if assets %}
+<div class="overflow-x-auto">
 <table class="dt">
   <thead>
     <tr>
@@ -35,19 +35,19 @@
   <tbody>
     {% for a in assets %}
     <tr>
-      <td class="mono"><strong>{{ a.code }}</strong></td>
-      <td><a href="/admin/accounting/fixedasset/{{ a.id }}/change/">{{ a.name }}</a></td>
+      <td class="mono font-semibold text-neutral-950">{{ a.code }}</td>
+      <td><a href="/admin/accounting/fixedasset/{{ a.id }}/change/" class="underline underline-offset-2 hover:text-neutral-700">{{ a.name }}</a></td>
       <td class="mono">{{ a.purchase_date|date:"Y-m-d" }}</td>
       <td class="mono">{{ a.in_service_date|date:"Y-m-d" }}</td>
       <td class="num">{{ a.purchase_cost|floatformat:0|intcomma }}</td>
-      <td class="num neg">{{ a.computed_total_posted|floatformat:0|intcomma }}</td>
-      <td class="num"><strong>{{ a.computed_book_value|floatformat:0|intcomma }}</strong></td>
-      <td>{{ a.get_method_display }} · <span style="color: var(--muted);">{{ a.useful_life_months }} mo</span></td>
+      <td class="num num-neg">{{ a.computed_total_posted|floatformat:0|intcomma }}</td>
+      <td class="num font-semibold text-neutral-950">{{ a.computed_book_value|floatformat:0|intcomma }}</td>
+      <td>{{ a.get_method_display }} · <span class="text-neutral-500">{{ a.useful_life_months }} mo</span></td>
       <td>
-        {% if a.state == "in_use" %}<span class="pill live">In use</span>
-        {% elif a.state == "fully_depreciated" %}<span class="pill">Depreciated</span>
-        {% elif a.state == "disposed" %}<span class="pill warn">Disposed</span>
-        {% else %}<span class="pill draft">Draft</span>{% endif %}
+        {% if a.state == "in_use" %}<span class="pill pill-success">In use</span>
+        {% elif a.state == "fully_depreciated" %}<span class="pill pill-neutral">Depreciated</span>
+        {% elif a.state == "disposed" %}<span class="pill pill-danger">Disposed</span>
+        {% else %}<span class="pill pill-draft">Draft</span>{% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -56,14 +56,18 @@
     <tr>
       <td colspan="4">Totals</td>
       <td class="num">{{ totals.cost|floatformat:0|intcomma }}</td>
-      <td class="num neg">{{ totals.depreciation|floatformat:0|intcomma }}</td>
+      <td class="num num-neg">{{ totals.depreciation|floatformat:0|intcomma }}</td>
       <td class="num">{{ totals.book_value|floatformat:0|intcomma }}</td>
       <td colspan="2"></td>
     </tr>
   </tfoot>
 </table>
+</div>
 {% else %}
-<div class="empty">No fixed assets yet.<br>Add one in <a href="/admin/accounting/fixedasset/add/" style="color: var(--emerald); text-decoration: underline;">Fixed Assets &rsaquo; Add</a>.</div>
+<div class="empty">
+  No fixed assets yet.<br>
+  Add one in <a href="/admin/accounting/fixedasset/add/">Fixed Assets &rsaquo; Add</a>.
+</div>
 {% endif %}
 
 {% endblock %}

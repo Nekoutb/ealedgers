@@ -290,7 +290,13 @@ div.breadcrumbs a:hover { color: var(--color-brand-darker); text-decoration: und
 /* ============ INDEX / SITE ADMINISTRATION ============ */
 #content-main { display: grid; gap: 16px; }
 
-.app-accounting, .app-auth, .module {
+/* IMPORTANT: only `div.module`, not bare `.app-accounting` / `.app-auth`.
+   Django's admin adds `app-{appname}` classes to <body> on every page
+   inside that app (e.g. body.app-accounting on the partner change-form),
+   so a bare `.app-accounting` selector with `overflow: hidden` would
+   collapse the entire page. The admin index's app cards always have
+   `class="app-{name} module ..."` so `.module` alone matches them. */
+div.module {
   border: 1px solid var(--neutral-200);
   background: #fff;
   border-radius: 8px;

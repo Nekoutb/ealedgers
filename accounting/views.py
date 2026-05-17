@@ -18,6 +18,7 @@ from .forms import SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     Account,
+    CustomerInvoice,
     DepreciationLine,
     FixedAsset,
     Journal,
@@ -146,7 +147,7 @@ MODULES = [
     {"slug": "accounting",  "name": "Accounting",      "tagline": "General ledger",
      "url": "/accounting/", "status": "live", "icon": ICON_ACCOUNTING},
     {"slug": "billing",     "name": "Billing",         "tagline": "Customer invoices",
-     "url": None,           "status": "soon", "icon": ICON_BILLING},
+     "url": "/accounting/invoices/", "status": "live", "icon": ICON_BILLING},
     {"slug": "hr",          "name": "People",          "tagline": "Employees & grades",
      "url": None,           "status": "soon", "icon": ICON_PEOPLE},
     {"slug": "reports",     "name": "Reports",         "tagline": "Analytics",
@@ -439,3 +440,130 @@ def fixed_assets_register(request):
         "accounting/fixed_assets_register.html",
         {"assets": assets, "totals": totals, "tenant_name": t.name},
     )
+
+
+# ---------------------------------------------------------------------------
+# Customer invoicing
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@tenant_required
+def invoice_list(request):
+    """Listing of customer invoices, optionally filtered by state."""
+    t = request.tenant
+    qs = (
+        CustomerInvoice.objects.for_tenant(t)
+        .select_related("partner", "currency", "journal")
+        .order_by("-date", "-id")
+    )
+    state = request.GET.get("state", "")
+    if state in {"draft", "posted", "paid", "cancelled"}:
+        qs = qs.filter(state=state)
+
+    invoices = list(qs[:200])
+
+    # Pre-aggregate totals for the header strip
+    base = CustomerInvoice.objects.for_tenant(t)
+    counts = {
+        "all": base.count(),
+        "draft": base.filter(state="draft").count(),
+        "posted": base.filter(state="posted").count(),
+        "paid": base.filter(state="paid").count(),
+        "cancelled": base.filter(state="cancelled").count(),
+    }
+    outstanding = base.filter(state="posted").aggregate(
+        s=Sum("amount_total"),
+    )["s"] or Decimal("0")
+
+    return render(
+        request,
+        "accounting/invoice_list.html",
+        {
+            "invoices": invoices,
+            "counts": counts,
+            "active_state": state,
+            "outstanding": outstanding,
+            "tenant_name": t.name,
+        },
+    )
+
+
+@login_required
+@tenant_required
+def invoice_detail(request, pk):
+    """Print-ready detail view of one invoice."""
+    t = request.tenant
+    inv = (
+        CustomerInvoice.objects.for_tenant(t)
+        .select_related("partner", "currency", "journal", "tenant",
+                        "journal_entry", "payment_entry")
+        .prefetch_related("lines__account")
+        .get(pk=pk)
+    )
+    # Bank/cash journals available for "Record payment"
+    pay_journals = Journal.objects.for_tenant(t).filter(
+        type__in=("bank", "cash"), active=True,
+    ).order_by("code")
+    return render(
+        request,
+        "accounting/invoice_detail.html",
+        {
+            "inv": inv,
+            "lines": inv.lines.all(),
+            "pay_journals": pay_journals,
+            "tenant_name": t.name,
+        },
+    )
+
+
+@login_required
+@tenant_required
+@require_POST
+def invoice_post(request, pk):
+    """Transition draft → posted (creates the journal entry)."""
+    from django.contrib import messages
+    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
+    try:
+        inv.post()
+        messages.success(request, f"Invoice {inv.number} posted.")
+    except Exception as exc:
+        messages.error(request, f"Could not post invoice: {exc}")
+    return redirect("accounting:invoice_detail", pk=pk)
+
+
+@login_required
+@tenant_required
+@require_POST
+def invoice_record_payment(request, pk):
+    """Transition posted → paid (creates the payment journal entry)."""
+    from django.contrib import messages
+    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
+    journal_id = request.POST.get("journal_id")
+    if not journal_id:
+        messages.error(request, "Pick a bank or cash journal to record the payment.")
+        return redirect("accounting:invoice_detail", pk=pk)
+    try:
+        journal = Journal.objects.for_tenant(request.tenant).get(pk=journal_id)
+        inv.record_payment(journal)
+        messages.success(request, f"Payment recorded for {inv.number}.")
+    except Journal.DoesNotExist:
+        messages.error(request, "Journal not found.")
+    except Exception as exc:
+        messages.error(request, f"Could not record payment: {exc}")
+    return redirect("accounting:invoice_detail", pk=pk)
+
+
+@login_required
+@tenant_required
+@require_POST
+def invoice_cancel(request, pk):
+    """Transition draft → cancelled."""
+    from django.contrib import messages
+    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
+    try:
+        inv.cancel()
+        messages.success(request, f"Invoice cancelled.")
+    except Exception as exc:
+        messages.error(request, f"Could not cancel: {exc}")
+    return redirect("accounting:invoice_detail", pk=pk)

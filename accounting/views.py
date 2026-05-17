@@ -26,6 +26,7 @@ from .models import (
     JournalEntryLine,
     Membership,
     Partner,
+    SupplierBill,
 )
 
 
@@ -567,3 +568,128 @@ def invoice_cancel(request, pk):
     except Exception as exc:
         messages.error(request, f"Could not cancel: {exc}")
     return redirect("accounting:invoice_detail", pk=pk)
+
+
+# ---------------------------------------------------------------------------
+# Supplier bills (Phase 1.2) — mirror of customer invoicing views
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@tenant_required
+def bill_list(request):
+    """Listing of supplier bills, optionally filtered by state."""
+    t = request.tenant
+    qs = (
+        SupplierBill.objects.for_tenant(t)
+        .select_related("partner", "currency", "journal")
+        .order_by("-date", "-id")
+    )
+    state = request.GET.get("state", "")
+    if state in {"draft", "posted", "paid", "cancelled"}:
+        qs = qs.filter(state=state)
+
+    bills = list(qs[:200])
+
+    base = SupplierBill.objects.for_tenant(t)
+    counts = {
+        "all": base.count(),
+        "draft": base.filter(state="draft").count(),
+        "posted": base.filter(state="posted").count(),
+        "paid": base.filter(state="paid").count(),
+        "cancelled": base.filter(state="cancelled").count(),
+    }
+    outstanding = base.filter(state="posted").aggregate(
+        s=Sum("amount_total"),
+    )["s"] or Decimal("0")
+
+    return render(
+        request,
+        "accounting/bill_list.html",
+        {
+            "bills": bills,
+            "counts": counts,
+            "active_state": state,
+            "outstanding": outstanding,
+            "tenant_name": t.name,
+        },
+    )
+
+
+@login_required
+@tenant_required
+def bill_detail(request, pk):
+    """Detail view of one bill."""
+    t = request.tenant
+    bill = (
+        SupplierBill.objects.for_tenant(t)
+        .select_related("partner", "currency", "journal", "tenant",
+                        "journal_entry", "payment_entry")
+        .prefetch_related("lines__account")
+        .get(pk=pk)
+    )
+    pay_journals = Journal.objects.for_tenant(t).filter(
+        type__in=("bank", "cash"), active=True,
+    ).order_by("code")
+    return render(
+        request,
+        "accounting/bill_detail.html",
+        {
+            "bill": bill,
+            "lines": bill.lines.all(),
+            "pay_journals": pay_journals,
+            "tenant_name": t.name,
+        },
+    )
+
+
+@login_required
+@tenant_required
+@require_POST
+def bill_post(request, pk):
+    """Transition draft → posted."""
+    from django.contrib import messages
+    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
+    try:
+        bill.post()
+        messages.success(request, f"Bill {bill.number} posted.")
+    except Exception as exc:
+        messages.error(request, f"Could not post bill: {exc}")
+    return redirect("accounting:bill_detail", pk=pk)
+
+
+@login_required
+@tenant_required
+@require_POST
+def bill_record_payment(request, pk):
+    """Transition posted → paid."""
+    from django.contrib import messages
+    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
+    journal_id = request.POST.get("journal_id")
+    if not journal_id:
+        messages.error(request, "Pick a bank or cash journal to record the payment.")
+        return redirect("accounting:bill_detail", pk=pk)
+    try:
+        journal = Journal.objects.for_tenant(request.tenant).get(pk=journal_id)
+        bill.record_payment(journal)
+        messages.success(request, f"Payment recorded for {bill.number}.")
+    except Journal.DoesNotExist:
+        messages.error(request, "Journal not found.")
+    except Exception as exc:
+        messages.error(request, f"Could not record payment: {exc}")
+    return redirect("accounting:bill_detail", pk=pk)
+
+
+@login_required
+@tenant_required
+@require_POST
+def bill_cancel(request, pk):
+    """Transition draft → cancelled."""
+    from django.contrib import messages
+    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
+    try:
+        bill.cancel()
+        messages.success(request, "Bill cancelled.")
+    except Exception as exc:
+        messages.error(request, f"Could not cancel: {exc}")
+    return redirect("accounting:bill_detail", pk=pk)

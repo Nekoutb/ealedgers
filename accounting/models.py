@@ -644,8 +644,10 @@ class DepreciationLine(models.Model):
 
 # SYSCOHADA account codes the invoicing engine looks up by convention. Each
 # tenant ships with the full chart preloaded, so these are reliable defaults.
-SYSCOHADA_VAT_COLLECTED = '4434'       # TVA facturée
-SYSCOHADA_WHT_CREDIT = '4423'          # Acomptes versés (or 4421 in some variants)
+SYSCOHADA_VAT_COLLECTED = '4434'       # TVA facturée (sales)
+SYSCOHADA_VAT_RECOVERABLE = '4451'     # TVA récupérable (purchases)
+SYSCOHADA_WHT_CREDIT = '4423'          # Acomptes versés (WHT credit when WE sell)
+SYSCOHADA_WHT_PAYABLE = '4424'         # Acomptes reçus (WHT payable when WE buy)
 
 
 class CustomerInvoice(models.Model):
@@ -949,6 +951,335 @@ class CustomerInvoiceLine(models.Model):
 
     class Meta:
         ordering = ['invoice', 'sequence', 'id']
+
+    def __str__(self):
+        return f'{self.description} ({self.amount})'
+
+    @property
+    def amount_untaxed(self):
+        return (self.quantity * self.unit_price).quantize(Decimal('0.01'))
+
+    @property
+    def amount_tax(self):
+        return (self.amount_untaxed * self.tax_rate / 100).quantize(Decimal('0.01'))
+
+    @property
+    def amount(self):
+        return self.amount_untaxed + self.amount_tax
+
+
+# ---------------------------------------------------------------------------
+# Supplier bills (Phase 1.2)
+# ---------------------------------------------------------------------------
+
+
+class SupplierBill(models.Model):
+    """A vendor bill in draft → posted → paid lifecycle. Mirror of
+    CustomerInvoice but on the buy side.
+
+    Posting creates a balanced JournalEntry:
+      Dr 6xx Expense (per line):  line.amount_untaxed
+      Dr 4451 VAT recoverable:    vat_amount               (if any line taxed)
+      Cr 401x Vendor:             total - withholding      (net we owe vendor)
+      Cr 4424 WHT payable to gov: withholding_amount       (if WHT > 0)
+
+    Recording payment creates a second JournalEntry on the chosen
+    bank/cash journal:
+      Dr 401x Vendor:             total - withholding
+      Cr Bank/Cash:               total - withholding
+
+    The WHT liability stays on 4424 until separately remitted to the
+    tax authority (Phase 2.2).
+    """
+
+    STATES = [
+        ('draft', 'Draft'),
+        ('posted', 'Posted'),
+        ('paid', 'Paid'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='supplier_bills',
+    )
+    number = models.CharField(
+        max_length=32, blank=True,
+        help_text='Internal reference, auto-assigned on posting from the '
+                  'purchases journal sequence',
+    )
+    vendor_reference = models.CharField(
+        max_length=64, blank=True,
+        help_text="The vendor's own invoice number (printed on their PDF)",
+    )
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, related_name='supplier_bills',
+        limit_choices_to={'partner_type__in': ['vendor', 'both']},
+    )
+    journal = models.ForeignKey(
+        Journal, on_delete=models.PROTECT, related_name='supplier_bills',
+        limit_choices_to={'type': 'purchase'},
+        help_text='Purchases journal used for posting',
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, related_name='+',
+    )
+    date = models.DateField(help_text='Bill date')
+    due_date = models.DateField(help_text='Payment due')
+    state = models.CharField(max_length=16, choices=STATES, default='draft')
+
+    withholding_tax_rate = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('0'),
+        help_text='Percentage WE withhold from this vendor at source to '
+                  'remit to the tax authority (e.g. 5.50 for 5.5%)',
+    )
+
+    # Denormalised totals
+    amount_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_tax = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_withholding = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+
+    notes = models.TextField(blank=True)
+
+    journal_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='supplier_bill_post',
+    )
+    payment_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='supplier_bill_payment',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'number'],
+                name='unique_supplier_bill_number_per_tenant',
+                condition=~models.Q(number=''),
+            ),
+        ]
+
+    def __str__(self):
+        return self.number or f'Draft bill #{self.id}'
+
+    # --- amounts -----------------------------------------------------------
+
+    def recompute_amounts(self, save=True):
+        subtotal = Decimal('0')
+        tax = Decimal('0')
+        for line in self.lines.all():
+            subtotal += line.amount_untaxed
+            tax += line.amount_tax
+        total = subtotal + tax
+        wht = (total * self.withholding_tax_rate / 100).quantize(Decimal('0.01'))
+        self.amount_subtotal = subtotal
+        self.amount_tax = tax
+        self.amount_total = total
+        self.amount_withholding = wht
+        if save:
+            self.save(update_fields=[
+                'amount_subtotal', 'amount_tax', 'amount_total',
+                'amount_withholding', 'updated_at',
+            ])
+
+    @property
+    def amount_net_payable(self):
+        """What we actually owe the vendor (total minus the WHT we keep)."""
+        return self.amount_total - self.amount_withholding
+
+    # --- account lookups --------------------------------------------------
+
+    def _payable_account(self):
+        if self.partner.account_payable_id:
+            return self.partner.account_payable
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            type='payable', deprecated=False,
+        ).order_by('code').first()
+        if acc is None:
+            raise ValidationError(
+                'No payable account configured for the tenant. '
+                'Add one with type=Payable in the chart of accounts, '
+                'or set Partner.account_payable on the vendor.',
+            )
+        return acc
+
+    def _vat_account(self):
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            code=SYSCOHADA_VAT_RECOVERABLE, deprecated=False,
+        ).first()
+        if acc is None:
+            raise ValidationError(
+                f'VAT recoverable account {SYSCOHADA_VAT_RECOVERABLE} not '
+                f'found in the chart of accounts. Lines with tax > 0 '
+                f'cannot be posted.',
+            )
+        return acc
+
+    def _wht_account(self):
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            code=SYSCOHADA_WHT_PAYABLE, deprecated=False,
+        ).first()
+        if acc is None:
+            raise ValidationError(
+                f'WHT-payable account {SYSCOHADA_WHT_PAYABLE} not found '
+                f'in the chart of accounts.',
+            )
+        return acc
+
+    # --- state transitions ------------------------------------------------
+
+    @transaction.atomic
+    def post(self):
+        if self.state == 'posted' or self.state == 'paid':
+            return
+        if self.state == 'cancelled':
+            raise ValidationError('Cannot post a cancelled bill.')
+        if not self.lines.exists():
+            raise ValidationError('Bill has no lines — nothing to post.')
+
+        self.recompute_amounts(save=False)
+        if self.amount_total <= 0:
+            raise ValidationError('Bill total must be positive.')
+
+        payable = self._payable_account()
+        vat = self._vat_account() if self.amount_tax > 0 else None
+        wht = self._wht_account() if self.amount_withholding > 0 else None
+
+        if not self.number:
+            self.number = self.journal.next_entry_name()
+
+        entry = JournalEntry.objects.create(
+            tenant=self.tenant,
+            journal=self.journal,
+            date=self.date,
+            ref=f'Vendor bill {self.number}'
+                + (f' ({self.vendor_reference})' if self.vendor_reference else ''),
+            partner=self.partner,
+            notes=f'Posted from SupplierBill {self.number}',
+        )
+
+        # Dr Expense (per line)
+        for line in self.lines.all():
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=line.account, partner=self.partner,
+                name=line.description[:64] or f'BILL {self.number}',
+                debit=line.amount_untaxed, credit=Decimal('0'),
+            )
+        # Dr VAT recoverable
+        if vat is not None:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=vat, partner=self.partner,
+                name=f'VAT recov. {self.number}',
+                debit=self.amount_tax, credit=Decimal('0'),
+            )
+        # Cr Payable (net of WHT)
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=payable, partner=self.partner,
+            name=f'BILL {self.number}',
+            debit=Decimal('0'), credit=self.amount_net_payable,
+        )
+        # Cr WHT payable to govt
+        if wht is not None:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=wht, partner=self.partner,
+                name=f'WHT {self.number}',
+                debit=Decimal('0'), credit=self.amount_withholding,
+            )
+
+        entry.post()
+        self.journal_entry = entry
+        self.state = 'posted'
+        self.posted_at = timezone.now()
+        self.save()
+
+    @transaction.atomic
+    def record_payment(self, bank_journal, payment_date=None):
+        if self.state != 'posted':
+            raise ValidationError('Only posted bills can be paid.')
+        if not bank_journal.default_account_id:
+            raise ValidationError(
+                f'Journal {bank_journal.code} has no default account configured.',
+            )
+        if bank_journal.type not in ('bank', 'cash'):
+            raise ValidationError('Payment journal must be of type bank or cash.')
+
+        payable = self._payable_account()
+        payment_date = payment_date or timezone.now().date()
+        net = self.amount_net_payable
+
+        entry = JournalEntry.objects.create(
+            tenant=self.tenant,
+            journal=bank_journal,
+            date=payment_date,
+            ref=f'Payment for {self.number}',
+            partner=self.partner,
+            notes=f'Payment recorded against SupplierBill {self.number}',
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=payable,
+            partner=self.partner, name=f'Pay {self.number}',
+            debit=net, credit=Decimal('0'),
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=bank_journal.default_account,
+            partner=self.partner, name=f'Pay {self.number}',
+            debit=Decimal('0'), credit=net,
+        )
+        entry.post()
+
+        self.payment_entry = entry
+        self.state = 'paid'
+        self.paid_at = timezone.now()
+        self.save()
+
+    def cancel(self):
+        if self.state != 'draft':
+            raise ValidationError(
+                'Only draft bills can be cancelled. '
+                'Issue a debit note for posted bills.',
+            )
+        self.state = 'cancelled'
+        self.save(update_fields=['state', 'updated_at'])
+
+
+class SupplierBillLine(models.Model):
+    """A single line on a supplier bill."""
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='supplier_bill_lines',
+    )
+    bill = models.ForeignKey(
+        SupplierBill, on_delete=models.CASCADE, related_name='lines',
+    )
+    sequence = models.IntegerField(default=10)
+    description = models.CharField(max_length=512)
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, related_name='+',
+        limit_choices_to={'type__in': [
+            'expense', 'expense_direct_cost', 'expense_other',
+            'asset_current', 'asset_non_current', 'asset_fixed',
+        ]},
+        help_text='Expense or asset account being debited (e.g. 6xx in SYSCOHADA)',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('1'))
+    unit_price = models.DecimalField(max_digits=18, decimal_places=2)
+    tax_rate = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('0'),
+        help_text='VAT percentage on this line',
+    )
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['bill', 'sequence', 'id']
 
     def __str__(self):
         return f'{self.description} ({self.amount})'

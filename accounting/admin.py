@@ -6,6 +6,8 @@ from django.utils import timezone
 from .models import (
     Account,
     Company,
+    CustomerInvoice,
+    CustomerInvoiceLine,
     Currency,
     DepreciationLine,
     FixedAsset,
@@ -319,3 +321,133 @@ class DepreciationLineAdmin(TenantAwareAdmin):
     list_filter = ('posted', 'period_date')
     search_fields = ('asset__code', 'asset__name')
     list_select_related = ('asset', 'journal_entry')
+
+
+# ---------------------------------------------------------------------------
+# Customer invoicing (Phase 1.1)
+# ---------------------------------------------------------------------------
+
+
+class CustomerInvoiceLineInline(admin.TabularInline):
+    model = CustomerInvoiceLine
+    extra = 1
+    fields = ('sequence', 'description', 'account', 'quantity', 'unit_price', 'tax_rate')
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        tenant = getattr(request, 'tenant', None)
+        if tenant is None:
+            return qs.none()
+        return qs.filter(tenant=tenant)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        tenant = getattr(request, 'tenant', None)
+        if tenant is not None and db_field.name == 'account':
+            kwargs['queryset'] = Account.objects.filter(
+                tenant=tenant, type__in=['income', 'income_other'], deprecated=False,
+            ).order_by('code')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_new(self, form, commit=True):
+        """Inline-saved new line — set tenant from the parent invoice."""
+        obj = super().save_new(form, commit=False)
+        obj.tenant_id = obj.invoice.tenant_id
+        if commit:
+            obj.save()
+        return obj
+
+
+@admin.register(CustomerInvoice)
+class CustomerInvoiceAdmin(TenantAwareAdmin):
+    list_display = (
+        'number_or_draft', 'date', 'partner', 'amount_total', 'amount_withholding',
+        'state', 'due_date',
+    )
+    list_filter = ('state', 'date', 'journal')
+    search_fields = ('number', 'partner__name', 'notes')
+    list_select_related = ('partner', 'journal', 'currency')
+    autocomplete_fields = ('partner',)
+    readonly_fields = (
+        'number', 'state', 'amount_subtotal', 'amount_tax', 'amount_withholding',
+        'amount_total', 'journal_entry', 'payment_entry',
+        'created_at', 'updated_at', 'posted_at', 'paid_at',
+    )
+    fieldsets = (
+        (None, {
+            'fields': ('number', 'partner', 'date', 'due_date', 'state'),
+        }),
+        ('Booking', {
+            'fields': ('journal', 'currency', 'withholding_tax_rate'),
+        }),
+        ('Amounts', {
+            'fields': ('amount_subtotal', 'amount_tax', 'amount_withholding', 'amount_total'),
+        }),
+        ('Audit', {
+            'classes': ('collapse',),
+            'fields': ('journal_entry', 'payment_entry',
+                       'created_at', 'updated_at', 'posted_at', 'paid_at', 'notes'),
+        }),
+    )
+    inlines = [CustomerInvoiceLineInline]
+    actions = ['action_post', 'action_cancel']
+
+    @admin.display(description='Number', ordering='number')
+    def number_or_draft(self, obj):
+        return obj.number or f'(draft #{obj.id})'
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        # Recompute totals after main row save — inline lines save afterwards
+        # in Django's admin flow, so this catches any header-only edits
+        # (changing WHT rate, for example).
+        obj.recompute_amounts()
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        # Now inline lines exist — recompute again.
+        form.instance.recompute_amounts()
+
+    @admin.action(description='Post selected draft invoices')
+    def action_post(self, request, queryset):
+        posted = 0
+        errors = []
+        for inv in queryset:
+            try:
+                inv.post()
+                posted += 1
+            except Exception as exc:  # ValidationError or anything from post()
+                errors.append(f'{inv}: {exc}')
+        if posted:
+            self.message_user(
+                request, f'Posted {posted} invoice(s).', level=messages.SUCCESS,
+            )
+        for err in errors:
+            self.message_user(request, err, level=messages.ERROR)
+
+    @admin.action(description='Cancel selected draft invoices')
+    def action_cancel(self, request, queryset):
+        cancelled = 0
+        for inv in queryset.filter(state='draft'):
+            inv.cancel()
+            cancelled += 1
+        self.message_user(
+            request, f'Cancelled {cancelled} invoice(s).',
+            level=messages.SUCCESS if cancelled else messages.WARNING,
+        )
+
+
+@admin.register(CustomerInvoiceLine)
+class CustomerInvoiceLineAdmin(TenantAwareAdmin):
+    list_display = ('invoice', 'sequence', 'description', 'quantity', 'unit_price',
+                    'tax_rate', 'amount_untaxed_disp', 'amount_disp')
+    list_filter = ('invoice__state',)
+    search_fields = ('description', 'invoice__number')
+    list_select_related = ('invoice', 'account')
+
+    @admin.display(description='Subtotal')
+    def amount_untaxed_disp(self, obj):
+        return obj.amount_untaxed
+
+    @admin.display(description='Total')
+    def amount_disp(self, obj):
+        return obj.amount

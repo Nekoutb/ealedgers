@@ -18,10 +18,13 @@ from accounting.middleware import TenantContextMiddleware
 from accounting.models import (
     Account,
     Currency,
+    CustomerInvoice,
+    CustomerInvoiceLine,
     Journal,
     JournalEntry,
     JournalEntryLine,
     Membership,
+    Partner,
     Tenant,
 )
 
@@ -512,3 +515,311 @@ class TenantSwitcherTests(TestCase):
         self.client.force_login(self.bob)  # 1 membership only
         r = self.client.get("/workspace/")
         self.assertNotContains(r, "ea-tenant-switcher")
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.1 — Customer invoicing
+# ---------------------------------------------------------------------------
+
+
+class CustomerInvoiceTests(TestCase):
+    """The invoice lifecycle: draft → posted → paid, including WHT math."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_inv", "a@a.test", "x")
+        cls.tenant = _make_tenant("inv-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+
+        # SYSCOHADA accounts the invoicing engine relies on
+        cls.acct_ar = Account.objects.create(
+            tenant=cls.tenant, code="411100", name="Customers", type="receivable", reconcile=True,
+        )
+        cls.acct_rev = Account.objects.create(
+            tenant=cls.tenant, code="706000", name="Services revenue", type="income",
+        )
+        cls.acct_vat = Account.objects.create(
+            tenant=cls.tenant, code="4434", name="VAT collected", type="liability_current",
+        )
+        cls.acct_wht = Account.objects.create(
+            tenant=cls.tenant, code="4423", name="WHT credit", type="asset_current",
+        )
+        cls.acct_bank = Account.objects.create(
+            tenant=cls.tenant, code="521000", name="Bank A/C", type="asset_cash", reconcile=True,
+        )
+
+        # Journals
+        cls.sales = Journal.objects.create(
+            tenant=cls.tenant, code="VEN", name="Sales", type="sale",
+            sequence_prefix="INV/", next_sequence=1,
+        )
+        cls.bank = Journal.objects.create(
+            tenant=cls.tenant, code="BNK", name="Bank", type="bank",
+            default_account=cls.acct_bank, sequence_prefix="BNK/", next_sequence=1,
+        )
+
+        cls.customer = Partner.objects.create(
+            tenant=cls.tenant, name="Acme Customer", partner_type="customer",
+            account_receivable=cls.acct_ar,
+        )
+
+    # ----- helpers ---------------------------------------------------------
+
+    def _make_invoice(self, *, wht=Decimal("0"), tax=Decimal("0"), qty=1, price=Decimal("100000")):
+        inv = CustomerInvoice.objects.create(
+            tenant=self.tenant,
+            partner=self.customer,
+            journal=self.sales,
+            currency=self.xaf,
+            date=date(2026, 5, 17),
+            due_date=date(2026, 6, 16),
+            withholding_tax_rate=wht,
+        )
+        CustomerInvoiceLine.objects.create(
+            tenant=self.tenant, invoice=inv, sequence=10,
+            description="Consulting services",
+            account=self.acct_rev,
+            quantity=Decimal(qty), unit_price=price, tax_rate=tax,
+        )
+        inv.recompute_amounts()
+        return inv
+
+    # ----- amount calculations --------------------------------------------
+
+    def test_amounts_no_tax_no_wht(self):
+        inv = self._make_invoice()
+        self.assertEqual(inv.amount_subtotal, Decimal("100000.00"))
+        self.assertEqual(inv.amount_tax, Decimal("0"))
+        self.assertEqual(inv.amount_total, Decimal("100000.00"))
+        self.assertEqual(inv.amount_withholding, Decimal("0.00"))
+
+    def test_amounts_with_vat(self):
+        inv = self._make_invoice(tax=Decimal("19.25"))
+        self.assertEqual(inv.amount_subtotal, Decimal("100000.00"))
+        self.assertEqual(inv.amount_tax, Decimal("19250.00"))
+        self.assertEqual(inv.amount_total, Decimal("119250.00"))
+
+    def test_amounts_with_wht_only(self):
+        inv = self._make_invoice(wht=Decimal("10"))
+        self.assertEqual(inv.amount_total, Decimal("100000.00"))
+        self.assertEqual(inv.amount_withholding, Decimal("10000.00"))
+        self.assertEqual(inv.amount_net_receivable, Decimal("90000.00"))
+
+    def test_amounts_with_vat_and_wht(self):
+        inv = self._make_invoice(tax=Decimal("19.25"), wht=Decimal("10"))
+        # WHT applied to total (incl. VAT) by convention here
+        self.assertEqual(inv.amount_total, Decimal("119250.00"))
+        self.assertEqual(inv.amount_withholding, Decimal("11925.00"))
+
+    # ----- post() ---------------------------------------------------------
+
+    def test_post_creates_balanced_journal_entry_no_tax(self):
+        inv = self._make_invoice()
+        inv.post()
+        self.assertEqual(inv.state, "posted")
+        self.assertIsNotNone(inv.journal_entry)
+        je = inv.journal_entry
+        self.assertEqual(je.state, "posted")
+        self.assertTrue(je.is_balanced)
+        # Dr Receivable 100000 / Cr Revenue 100000
+        debits = list(je.lines.filter(debit__gt=0).values_list("account__code", "debit"))
+        credits = list(je.lines.filter(credit__gt=0).values_list("account__code", "credit"))
+        self.assertEqual(debits, [("411100", Decimal("100000.00"))])
+        self.assertEqual(credits, [("706000", Decimal("100000.00"))])
+
+    def test_post_creates_vat_line(self):
+        inv = self._make_invoice(tax=Decimal("19.25"))
+        inv.post()
+        je = inv.journal_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 411 119250
+        # Cr 706 100000 + Cr 4434 19250
+        debits = je.lines.filter(debit__gt=0)
+        credits = je.lines.filter(credit__gt=0)
+        self.assertEqual(debits.count(), 1)
+        self.assertEqual(debits.first().debit, Decimal("119250.00"))
+        self.assertEqual(credits.count(), 2)
+        revenue_credit = credits.get(account=self.acct_rev).credit
+        vat_credit = credits.get(account=self.acct_vat).credit
+        self.assertEqual(revenue_credit, Decimal("100000.00"))
+        self.assertEqual(vat_credit, Decimal("19250.00"))
+
+    def test_post_creates_wht_debit_line(self):
+        inv = self._make_invoice(wht=Decimal("10"))
+        inv.post()
+        je = inv.journal_entry
+        self.assertTrue(je.is_balanced)
+        # Dr 411 90000 + Dr 4423 10000 = 100000 = Cr 706
+        ar = je.lines.get(account=self.acct_ar).debit
+        wht = je.lines.get(account=self.acct_wht).debit
+        rev = je.lines.get(account=self.acct_rev).credit
+        self.assertEqual(ar, Decimal("90000.00"))
+        self.assertEqual(wht, Decimal("10000.00"))
+        self.assertEqual(rev, Decimal("100000.00"))
+
+    def test_post_assigns_number_from_journal_sequence(self):
+        inv = self._make_invoice()
+        self.assertEqual(inv.number, "")
+        inv.post()
+        self.assertTrue(inv.number.startswith("INV/"))
+        # Posting another bumps the sequence
+        inv2 = self._make_invoice()
+        inv2.post()
+        self.assertNotEqual(inv2.number, inv.number)
+
+    def test_post_rejects_empty_invoice(self):
+        from django.core.exceptions import ValidationError
+        inv = CustomerInvoice.objects.create(
+            tenant=self.tenant, partner=self.customer, journal=self.sales,
+            currency=self.xaf, date=date.today(), due_date=date.today(),
+        )
+        with self.assertRaises(ValidationError):
+            inv.post()
+        inv.refresh_from_db()
+        self.assertEqual(inv.state, "draft")
+
+    def test_post_is_idempotent(self):
+        inv = self._make_invoice()
+        inv.post()
+        number = inv.number
+        inv.post()  # Should be a no-op
+        inv.refresh_from_db()
+        self.assertEqual(inv.number, number)
+
+    def test_post_rejects_cancelled(self):
+        from django.core.exceptions import ValidationError
+        inv = self._make_invoice()
+        inv.cancel()
+        with self.assertRaises(ValidationError):
+            inv.post()
+
+    # ----- record_payment() ----------------------------------------------
+
+    def test_record_payment_creates_balanced_entry(self):
+        inv = self._make_invoice(wht=Decimal("10"))
+        inv.post()
+        inv.record_payment(self.bank)
+        self.assertEqual(inv.state, "paid")
+        self.assertIsNotNone(inv.payment_entry)
+        je = inv.payment_entry
+        self.assertTrue(je.is_balanced)
+        # Dr Bank net / Cr AR net (the WHT portion stays as a 4423 asset)
+        bank_debit = je.lines.get(account=self.acct_bank).debit
+        ar_credit = je.lines.get(account=self.acct_ar).credit
+        self.assertEqual(bank_debit, Decimal("90000.00"))
+        self.assertEqual(ar_credit, Decimal("90000.00"))
+
+    def test_record_payment_rejects_draft(self):
+        from django.core.exceptions import ValidationError
+        inv = self._make_invoice()
+        with self.assertRaises(ValidationError):
+            inv.record_payment(self.bank)
+
+    def test_cancel_only_draft(self):
+        from django.core.exceptions import ValidationError
+        inv = self._make_invoice()
+        inv.post()
+        with self.assertRaises(ValidationError):
+            inv.cancel()
+
+    # ----- views ----------------------------------------------------------
+
+    def test_invoice_list_view_renders(self):
+        self._make_invoice()
+        self._make_invoice()
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/invoices/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.context["invoices"]), 2)
+
+    def test_invoice_detail_view_renders(self):
+        inv = self._make_invoice()
+        self.client.force_login(self.alice)
+        r = self.client.get(f"/accounting/invoices/{inv.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Acme Customer")
+        self.assertContains(r, "Consulting services")
+
+    def test_invoice_post_view_transitions_to_posted(self):
+        inv = self._make_invoice()
+        self.client.force_login(self.alice)
+        r = self.client.post(f"/accounting/invoices/{inv.id}/post/")
+        self.assertEqual(r.status_code, 302)
+        inv.refresh_from_db()
+        self.assertEqual(inv.state, "posted")
+
+    def test_invoice_payment_view_transitions_to_paid(self):
+        inv = self._make_invoice()
+        inv.post()
+        self.client.force_login(self.alice)
+        r = self.client.post(
+            f"/accounting/invoices/{inv.id}/pay/",
+            {"journal_id": self.bank.id},
+        )
+        self.assertEqual(r.status_code, 302)
+        inv.refresh_from_db()
+        self.assertEqual(inv.state, "paid")
+
+
+class CustomerInvoiceTenantIsolationTests(TestCase):
+    """Invoices belong to their tenant; data must not leak across."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_iso", "a@a.test", "x")
+        cls.bob = User.objects.create_superuser("bob_iso", "b@b.test", "x")
+        cls.acme = _make_tenant("acme-iso", currency=cls.xaf, owner=cls.alice)
+        cls.beta = _make_tenant("beta-iso", currency=cls.xaf, owner=cls.bob)
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
+
+        cls.j_a = Journal.objects.create(tenant=cls.acme, code="VEN", name="Sales", type="sale")
+        cls.j_b = Journal.objects.create(tenant=cls.beta, code="VEN", name="Sales", type="sale")
+        cls.p_a = Partner.objects.create(tenant=cls.acme, name="ACME-CUST", partner_type="customer")
+        cls.p_b = Partner.objects.create(tenant=cls.beta, name="BETA-CUST", partner_type="customer")
+
+        CustomerInvoice.objects.create(
+            tenant=cls.acme, partner=cls.p_a, journal=cls.j_a, currency=cls.xaf,
+            date=date.today(), due_date=date.today(),
+        )
+        CustomerInvoice.objects.create(
+            tenant=cls.beta, partner=cls.p_b, journal=cls.j_b, currency=cls.xaf,
+            date=date.today(), due_date=date.today(),
+        )
+
+    def test_for_tenant_filters_correctly(self):
+        self.assertEqual(CustomerInvoice.objects.for_tenant(self.acme).count(), 1)
+        self.assertEqual(CustomerInvoice.objects.for_tenant(self.beta).count(), 1)
+        self.assertEqual(
+            CustomerInvoice.objects.for_tenant(self.acme).first().partner.name,
+            "ACME-CUST",
+        )
+
+    def test_invoice_list_view_filters_by_tenant(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/invoices/")
+        body = r.content.decode("utf-8", errors="replace")
+        self.assertIn("ACME-CUST", body)
+        self.assertNotIn("BETA-CUST", body)
+
+    def test_admin_invoice_list_filters_by_tenant(self):
+        self.client.force_login(self.bob)
+        r = self.client.get("/admin/accounting/customerinvoice/")
+        body = r.content.decode("utf-8", errors="replace")
+        self.assertIn("BETA-CUST", body)
+        self.assertNotIn("ACME-CUST", body)
+
+    def test_invoice_number_unique_within_tenant_but_not_across(self):
+        """Two tenants can both have invoice INV/00001."""
+        inv_a = CustomerInvoice.objects.filter(tenant=self.acme).first()
+        inv_b = CustomerInvoice.objects.filter(tenant=self.beta).first()
+        inv_a.number = "INV/00001"
+        inv_a.save()
+        inv_b.number = "INV/00001"
+        inv_b.save()  # Should succeed — per-tenant uniqueness
+        self.assertEqual(inv_a.number, inv_b.number)
+        self.assertNotEqual(inv_a.tenant_id, inv_b.tenant_id)

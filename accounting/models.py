@@ -636,3 +636,331 @@ class DepreciationLine(models.Model):
 
     def __str__(self):
         return f'{self.asset.code} {self.period_date}: {self.amount}'
+
+
+# ---------------------------------------------------------------------------
+# Customer invoicing (Phase 1.1)
+# ---------------------------------------------------------------------------
+
+# SYSCOHADA account codes the invoicing engine looks up by convention. Each
+# tenant ships with the full chart preloaded, so these are reliable defaults.
+SYSCOHADA_VAT_COLLECTED = '4434'       # TVA facturée
+SYSCOHADA_WHT_CREDIT = '4423'          # Acomptes versés (or 4421 in some variants)
+
+
+class CustomerInvoice(models.Model):
+    """A customer-facing invoice in draft → posted → paid lifecycle.
+
+    Posting creates a balanced JournalEntry:
+      Dr 411x Customer:          total - withholding
+      Dr 4423 WHT credit:        withholding_amount      (if WHT > 0)
+      Cr 70x  Revenue (per line): line.amount_untaxed
+      Cr 4434 VAT collected:     vat_amount              (if any line has tax)
+
+    Recording payment creates a second JournalEntry on the chosen
+    bank/cash journal:
+      Dr Bank/Cash:              total - withholding
+      Cr 411x Customer:          total - withholding
+    """
+
+    STATES = [
+        ('draft', 'Draft'),
+        ('posted', 'Posted'),
+        ('paid', 'Paid'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='customer_invoices',
+    )
+    number = models.CharField(
+        max_length=32, blank=True,
+        help_text='Auto-assigned on posting from the sales journal sequence',
+    )
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, related_name='customer_invoices',
+        limit_choices_to={'partner_type__in': ['customer', 'both']},
+    )
+    journal = models.ForeignKey(
+        Journal, on_delete=models.PROTECT, related_name='customer_invoices',
+        limit_choices_to={'type': 'sale'},
+        help_text='Sales journal used for posting',
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, related_name='+',
+    )
+    date = models.DateField(help_text='Invoice date')
+    due_date = models.DateField(help_text='Payment due')
+    state = models.CharField(max_length=16, choices=STATES, default='draft')
+
+    withholding_tax_rate = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('0'),
+        help_text='Percentage withheld at source by the buyer (e.g. 10.00 for 10%)',
+    )
+
+    # Denormalised totals (recomputed from lines on save). Stored so
+    # reports stay fast without an aggregate join.
+    amount_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_tax = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_withholding = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+    amount_total = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('0'))
+
+    notes = models.TextField(blank=True)
+
+    # Audit / state pointers
+    journal_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='customer_invoice_post',
+        help_text='Set once the invoice is posted to the GL',
+    )
+    payment_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='customer_invoice_payment',
+        help_text='Set once payment has been recorded',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'number'],
+                name='unique_invoice_number_per_tenant',
+                condition=~models.Q(number=''),
+            ),
+        ]
+
+    def __str__(self):
+        return self.number or f'Draft invoice #{self.id}'
+
+    # --- amounts -----------------------------------------------------------
+
+    def recompute_amounts(self, save=True):
+        """Recompute denormalised totals from current lines."""
+        subtotal = Decimal('0')
+        tax = Decimal('0')
+        for line in self.lines.all():
+            subtotal += line.amount_untaxed
+            tax += line.amount_tax
+        total = subtotal + tax
+        wht = (total * self.withholding_tax_rate / 100).quantize(Decimal('0.01'))
+        self.amount_subtotal = subtotal
+        self.amount_tax = tax
+        self.amount_total = total
+        self.amount_withholding = wht
+        if save:
+            self.save(update_fields=[
+                'amount_subtotal', 'amount_tax', 'amount_total',
+                'amount_withholding', 'updated_at',
+            ])
+
+    @property
+    def amount_net_receivable(self):
+        """What the customer actually owes (total minus the WHT they keep)."""
+        return self.amount_total - self.amount_withholding
+
+    # --- account lookups (defaults from chart of accounts) ----------------
+
+    def _receivable_account(self):
+        if self.partner.account_receivable_id:
+            return self.partner.account_receivable
+        # First receivable-type account for this tenant
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            type='receivable', deprecated=False,
+        ).order_by('code').first()
+        if acc is None:
+            raise ValidationError(
+                'No receivable account configured for the tenant. '
+                'Add one with type=Receivable in the chart of accounts, '
+                'or set Partner.account_receivable on the customer.',
+            )
+        return acc
+
+    def _vat_account(self):
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            code=SYSCOHADA_VAT_COLLECTED, deprecated=False,
+        ).first()
+        if acc is None:
+            raise ValidationError(
+                f'VAT account {SYSCOHADA_VAT_COLLECTED} not found in the '
+                f'chart of accounts. Lines with tax > 0 cannot be posted.',
+            )
+        return acc
+
+    def _wht_account(self):
+        acc = Account.objects.for_tenant(self.tenant).filter(
+            code=SYSCOHADA_WHT_CREDIT, deprecated=False,
+        ).first()
+        if acc is None:
+            raise ValidationError(
+                f'Withholding-tax credit account {SYSCOHADA_WHT_CREDIT} '
+                f'not found in the chart of accounts.',
+            )
+        return acc
+
+    # --- state transitions -------------------------------------------------
+
+    @transaction.atomic
+    def post(self):
+        """Validate and post the invoice. Creates and posts the journal entry."""
+        if self.state == 'posted' or self.state == 'paid':
+            return
+        if self.state == 'cancelled':
+            raise ValidationError('Cannot post a cancelled invoice.')
+        if not self.lines.exists():
+            raise ValidationError('Invoice has no lines — nothing to post.')
+
+        self.recompute_amounts(save=False)
+        if self.amount_total <= 0:
+            raise ValidationError('Invoice total must be positive.')
+
+        receivable = self._receivable_account()
+        vat = self._vat_account() if self.amount_tax > 0 else None
+        wht = self._wht_account() if self.amount_withholding > 0 else None
+
+        if not self.number:
+            self.number = self.journal.next_entry_name()
+
+        entry = JournalEntry.objects.create(
+            tenant=self.tenant,
+            journal=self.journal,
+            date=self.date,
+            ref=f'Customer invoice {self.number}',
+            partner=self.partner,
+            notes=f'Posted from CustomerInvoice {self.number}',
+        )
+
+        # Dr Receivable (net of WHT)
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=receivable, partner=self.partner,
+            name=f'INV {self.number}',
+            debit=self.amount_net_receivable, credit=Decimal('0'),
+        )
+        # Dr WHT credit
+        if wht is not None:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=wht, partner=self.partner,
+                name=f'WHT {self.number}',
+                debit=self.amount_withholding, credit=Decimal('0'),
+            )
+        # Cr Revenue (per line)
+        for line in self.lines.all():
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=line.account, partner=self.partner,
+                name=line.description[:64] or f'INV {self.number}',
+                debit=Decimal('0'), credit=line.amount_untaxed,
+            )
+        # Cr VAT collected
+        if vat is not None:
+            JournalEntryLine.objects.create(
+                tenant=self.tenant, entry=entry, account=vat, partner=self.partner,
+                name=f'VAT {self.number}',
+                debit=Decimal('0'), credit=self.amount_tax,
+            )
+
+        entry.post()
+        self.journal_entry = entry
+        self.state = 'posted'
+        self.posted_at = timezone.now()
+        self.save()
+
+    @transaction.atomic
+    def record_payment(self, bank_journal, payment_date=None):
+        """Record full payment via the given bank/cash journal."""
+        if self.state != 'posted':
+            raise ValidationError('Only posted invoices can be paid.')
+        if not bank_journal.default_account_id:
+            raise ValidationError(
+                f'Journal {bank_journal.code} has no default account configured.',
+            )
+        if bank_journal.type not in ('bank', 'cash'):
+            raise ValidationError('Payment journal must be of type bank or cash.')
+
+        receivable = self._receivable_account()
+        payment_date = payment_date or timezone.now().date()
+        net = self.amount_net_receivable
+
+        entry = JournalEntry.objects.create(
+            tenant=self.tenant,
+            journal=bank_journal,
+            date=payment_date,
+            ref=f'Payment for {self.number}',
+            partner=self.partner,
+            notes=f'Payment recorded against CustomerInvoice {self.number}',
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=bank_journal.default_account,
+            partner=self.partner, name=f'Pay {self.number}',
+            debit=net, credit=Decimal('0'),
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=entry, account=receivable,
+            partner=self.partner, name=f'Pay {self.number}',
+            debit=Decimal('0'), credit=net,
+        )
+        entry.post()
+
+        self.payment_entry = entry
+        self.state = 'paid'
+        self.paid_at = timezone.now()
+        self.save()
+
+    def cancel(self):
+        """Only draft invoices can be cancelled. Posted ones need a credit note."""
+        if self.state != 'draft':
+            raise ValidationError(
+                'Only draft invoices can be cancelled. '
+                'Issue a credit note for posted invoices.',
+            )
+        self.state = 'cancelled'
+        self.save(update_fields=['state', 'updated_at'])
+
+
+class CustomerInvoiceLine(models.Model):
+    """A single line on a customer invoice."""
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='customer_invoice_lines',
+    )
+    invoice = models.ForeignKey(
+        CustomerInvoice, on_delete=models.CASCADE, related_name='lines',
+    )
+    sequence = models.IntegerField(default=10, help_text='Display order on the invoice')
+    description = models.CharField(max_length=512)
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, related_name='+',
+        limit_choices_to={'type__in': ['income', 'income_other']},
+        help_text='Revenue account (e.g. 70x in SYSCOHADA)',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal('1'))
+    unit_price = models.DecimalField(max_digits=18, decimal_places=2)
+    tax_rate = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('0'),
+        help_text='VAT percentage on this line (e.g. 19.25 for OHADA standard rate)',
+    )
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['invoice', 'sequence', 'id']
+
+    def __str__(self):
+        return f'{self.description} ({self.amount})'
+
+    @property
+    def amount_untaxed(self):
+        return (self.quantity * self.unit_price).quantize(Decimal('0.01'))
+
+    @property
+    def amount_tax(self):
+        return (self.amount_untaxed * self.tax_rate / 100).quantize(Decimal('0.01'))
+
+    @property
+    def amount(self):
+        return self.amount_untaxed + self.amount_tax

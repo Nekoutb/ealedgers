@@ -26,7 +26,7 @@ NAV = [
 
     _menu("Customers", groups=[
         _group([
-            _item("Invoices"),
+            _item("Invoices", "/accounting/invoices/"),
             _item("Credit Notes"),
             _item("Payments"),
             _item("Products"),

@@ -1,6 +1,7 @@
 """Django admin registration. This is the UI for the first draft."""
 
 from django.contrib import admin, messages
+from django.forms.models import BaseInlineFormSet
 from django.utils import timezone
 
 from .models import (
@@ -29,14 +30,36 @@ from .models import (
 # ---------------------------------------------------------------------------
 
 
+class TenantPropagatingInlineFormSet(BaseInlineFormSet):
+    """Inline formset that copies the parent's ``tenant_id`` onto each
+    child instance at form construction time.
+
+    Without this, models whose ``tenant`` FK is NOT NULL (which is all of
+    our business models since Phase 0.2's tightening) fail ``full_clean``
+    during admin inline validation — the parent has set ``tenant_id``
+    (see ``TenantAwareAdmin.save_form``), but the inline forms construct
+    fresh child instances without copying that FK over.
+    """
+
+    def _construct_form(self, i, **kwargs):
+        form = super()._construct_form(i, **kwargs)
+        parent_tenant_id = getattr(self.instance, "tenant_id", None)
+        child_has_tenant = any(
+            f.name == "tenant" for f in form.instance._meta.fields
+        )
+        if parent_tenant_id and child_has_tenant and not getattr(form.instance, "tenant_id", None):
+            form.instance.tenant_id = parent_tenant_id
+        return form
+
+
 class TenantAwareAdmin(admin.ModelAdmin):
     """Mixin for ModelAdmins of tenant-scoped models.
 
     - List view is filtered to ``request.tenant``.
-    - On add, ``obj.tenant`` is auto-set to ``request.tenant`` if not provided.
-    - FK selectors only show records belonging to ``request.tenant``
-      (so e.g. the account-picker on a JournalEntry line doesn't leak other
-      tenants' accounts).
+    - On add, ``obj.tenant`` is set to ``request.tenant`` BEFORE inline
+      validation runs (via ``save_form``), so inline-line saves can
+      propagate the parent's ``tenant_id`` to children.
+    - FK selectors only show records belonging to ``request.tenant``.
     """
 
     def get_queryset(self, request):
@@ -49,7 +72,36 @@ class TenantAwareAdmin(admin.ModelAdmin):
             return qs.none()
         return qs.filter(tenant=tenant)
 
+    def save_form(self, request, form, change):
+        """Set parent.tenant_id EARLY — before inline formsets validate.
+
+        Django's changeform_view runs in this order:
+          1. parent form_validated = form.is_valid()
+          2. new_object = self.save_form(request, form, change)
+          3. formsets = self._create_formsets(request, new_object, change)
+          4. all_valid(formsets)  ← inline lines validated here
+          5. self.save_model(request, new_object, form, change)
+          6. self.save_related(request, form, formsets, change)
+
+        ``save_model`` (step 5) used to be where we set ``tenant``, but
+        that's too late — by step 4 the inline lines have already failed
+        ``full_clean`` because they can't see the parent's tenant.
+
+        Setting it in ``save_form`` (step 2) means the instance has
+        ``tenant_id`` by the time inline formsets are built.
+        """
+        obj = super().save_form(request, form, change)
+        if not change and not getattr(obj, "tenant_id", None):
+            tenant = getattr(request, "tenant", None)
+            if tenant is not None and any(
+                f.name == "tenant" for f in obj._meta.fields
+            ):
+                obj.tenant = tenant
+        return obj
+
     def save_model(self, request, obj, form, change):
+        # save_form has typically already done this, but keep as belt-and-braces
+        # for code paths that hit save_model directly (e.g. bulk actions).
         if not change and not getattr(obj, "tenant_id", None):
             tenant = getattr(request, "tenant", None)
             if tenant is not None:
@@ -173,6 +225,14 @@ class JournalEntryLineInline(admin.TabularInline):
     extra = 2
     autocomplete_fields = ('account', 'partner')
     fields = ('account', 'partner', 'name', 'debit', 'credit')
+    formset = TenantPropagatingInlineFormSet
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        tenant = getattr(request, 'tenant', None)
+        if tenant is None:
+            return qs.none()
+        return qs.filter(tenant=tenant)
 
 
 @admin.register(JournalEntry)
@@ -192,6 +252,36 @@ class JournalEntryAdmin(TenantAwareAdmin):
         ('State', {'fields': ('state', 'name', 'posted_at')}),
         ('Audit', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
+
+    class Media:
+        # Live debit/credit running totals + balance indicator on the
+        # inline grid (see static file for behaviour).
+        js = ('accounting/admin/journal_entry_running_balance.js',)
+        css = {'all': ('accounting/admin/journal_entry_running_balance.css',)}
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Restrict the Journal selector to GENERAL / BANK / CASH journals.
+
+        Sale and purchase journals are auto-fed by CustomerInvoice and
+        SupplierBill respectively; allowing manual entries there risks
+        double-counting and breaks the invoice/bill state machines'
+        amount tracking. Users who really need to touch those journals
+        should edit the invoice/bill directly.
+
+        NOTE: we narrow the queryset on the returned ``formfield``, not via
+        ``kwargs['queryset']``, because the parent ``TenantAwareAdmin``
+        already overwrites ``kwargs['queryset']`` with a plain tenant
+        filter — our type-narrowing would be lost otherwise.
+        """
+        formfield = super().formfield_for_foreignkey(db_field, request, **kwargs)
+        tenant = getattr(request, 'tenant', None)
+        if db_field.name == 'journal' and tenant is not None and formfield is not None:
+            formfield.queryset = Journal.objects.filter(
+                tenant=tenant,
+                type__in=('general', 'bank', 'cash'),
+                active=True,
+            ).order_by('code')
+        return formfield
 
     @admin.display(description='Entry', ordering='name')
     def name_or_draft(self, obj):
@@ -336,6 +426,7 @@ class CustomerInvoiceLineInline(admin.TabularInline):
     model = CustomerInvoiceLine
     extra = 1
     fields = ('sequence', 'description', 'account', 'quantity', 'unit_price', 'tax_rate')
+    formset = TenantPropagatingInlineFormSet
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -351,14 +442,6 @@ class CustomerInvoiceLineInline(admin.TabularInline):
                 tenant=tenant, type__in=['income', 'income_other'], deprecated=False,
             ).order_by('code')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    def save_new(self, form, commit=True):
-        """Inline-saved new line — set tenant from the parent invoice."""
-        obj = super().save_new(form, commit=False)
-        obj.tenant_id = obj.invoice.tenant_id
-        if commit:
-            obj.save()
-        return obj
 
 
 @admin.register(CustomerInvoice)
@@ -466,6 +549,7 @@ class SupplierBillLineInline(admin.TabularInline):
     model = SupplierBillLine
     extra = 1
     fields = ('sequence', 'description', 'account', 'quantity', 'unit_price', 'tax_rate')
+    formset = TenantPropagatingInlineFormSet
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -486,13 +570,6 @@ class SupplierBillLineInline(admin.TabularInline):
                 deprecated=False,
             ).order_by('code')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    def save_new(self, form, commit=True):
-        obj = super().save_new(form, commit=False)
-        obj.tenant_id = obj.bill.tenant_id
-        if commit:
-            obj.save()
-        return obj
 
 
 @admin.register(SupplierBill)
@@ -596,6 +673,7 @@ class BankStatementLineInline(admin.TabularInline):
     fields = ('sequence', 'transaction_date', 'description', 'reference',
               'amount', 'state', 'matched_entry_line', 'generated_entry')
     readonly_fields = ('state', 'matched_entry_line', 'generated_entry')
+    formset = TenantPropagatingInlineFormSet
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -603,13 +681,6 @@ class BankStatementLineInline(admin.TabularInline):
         if tenant is None:
             return qs.none()
         return qs.filter(tenant=tenant)
-
-    def save_new(self, form, commit=True):
-        obj = super().save_new(form, commit=False)
-        obj.tenant_id = obj.statement.tenant_id
-        if commit:
-            obj.save()
-        return obj
 
 
 @admin.register(BankStatement)

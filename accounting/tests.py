@@ -340,6 +340,109 @@ class TenantAwareAdminTests(TestCase):
         self.assertNotIn("ACME-ONLY-ACCOUNT", body)
 
 
+class JournalEntryAdminSaveTests(TestCase):
+    """Regression: saving a JournalEntry with inline lines through the
+    admin must propagate tenant_id to the lines. Without that propagation,
+    the NOT NULL constraint on JournalEntryLine.tenant raises a
+    ValidationError and the page 500s."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_superuser("alice_je", "a@a.test", "x")
+        cls.tenant = _make_tenant("je-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+        cls.acct_cash = Account.objects.create(
+            tenant=cls.tenant, code="571000", name="Cash on hand", type="asset_cash",
+        )
+        cls.acct_exp = Account.objects.create(
+            tenant=cls.tenant, code="618000", name="Misc expense", type="expense",
+        )
+        cls.j_gen = Journal.objects.create(
+            tenant=cls.tenant, code="OD", name="Misc", type="general",
+            sequence_prefix="OD/", next_sequence=1,
+        )
+        cls.j_sale = Journal.objects.create(
+            tenant=cls.tenant, code="VEN", name="Sales", type="sale",
+            sequence_prefix="VEN/", next_sequence=1,
+        )
+        cls.j_purchase = Journal.objects.create(
+            tenant=cls.tenant, code="ACH", name="Purchases", type="purchase",
+            sequence_prefix="ACH/", next_sequence=1,
+        )
+
+    def _post_form(self, journal_id, *, lines=None):
+        """POST the admin add-form with two balanced inline lines.
+        Returns the raw HttpResponse so tests can inspect status + content."""
+        lines = lines or [
+            ("acct_cash", "100", "0"),
+            ("acct_exp", "0", "100"),
+        ]
+        data = {
+            "journal": str(journal_id),
+            "date": "2026-05-17",
+            "ref": "TEST",
+            "notes": "",
+            "state": "draft",
+            "name": "",
+            "posted_at_0": "",
+            "posted_at_1": "",
+            "lines-TOTAL_FORMS": "2",
+            "lines-INITIAL_FORMS": "0",
+            "lines-MIN_NUM_FORMS": "0",
+            "lines-MAX_NUM_FORMS": "1000",
+            "_save": "Save",
+        }
+        for i, (acct_attr, debit, credit) in enumerate(lines):
+            acct = getattr(self, acct_attr)
+            data[f"lines-{i}-account"] = str(acct.id)
+            data[f"lines-{i}-partner"] = ""
+            data[f"lines-{i}-name"] = f"line-{i}"
+            data[f"lines-{i}-debit"] = debit
+            data[f"lines-{i}-credit"] = credit
+        return self.client.post("/admin/accounting/journalentry/add/", data)
+
+    def test_save_does_not_500_with_balanced_lines(self):
+        """The crucial regression: was 500ing with ValidationError on tenant."""
+        self.client.force_login(self.alice)
+        r = self._post_form(self.j_gen.id)
+        # On success Django admin redirects (302) to the changelist;
+        # on validation error it re-renders the form (200). Anything 5xx
+        # means we regressed.
+        self.assertLess(r.status_code, 500,
+                        msg=f"JE admin save 500'd (got {r.status_code})")
+
+    def test_saved_lines_inherit_tenant_from_parent(self):
+        self.client.force_login(self.alice)
+        self._post_form(self.j_gen.id)
+        je = JournalEntry.objects.filter(tenant=self.tenant).first()
+        self.assertIsNotNone(je)
+        # Both inline lines should carry the parent's tenant_id
+        line_tenants = set(je.lines.values_list("tenant_id", flat=True))
+        self.assertEqual(line_tenants, {self.tenant.id})
+
+    def test_journal_selector_excludes_sale_and_purchase(self):
+        """Manual JEs should not be allowed on the sale/purchase journals
+        (which are auto-fed by CustomerInvoice / SupplierBill respectively)."""
+        self.client.force_login(self.alice)
+        r = self.client.get("/admin/accounting/journalentry/add/")
+        body = r.content.decode("utf-8", errors="replace")
+        # The OD (general) journal should be present in the journal dropdown
+        self.assertIn("OD", body)
+        # The sale/purchase journals must NOT be in the journal dropdown
+        # (we look for them inside the <select id="id_journal">...</select>)
+        import re
+        match = re.search(r'<select[^>]*name="journal"[^>]*>(.*?)</select>',
+                          body, re.DOTALL)
+        self.assertIsNotNone(match, "Journal selector not found on add form")
+        journal_options = match.group(1)
+        self.assertNotIn("VEN", journal_options,
+                         "Sales journal must not appear in manual-JE dropdown")
+        self.assertNotIn("ACH", journal_options,
+                         "Purchase journal must not appear in manual-JE dropdown")
+
+
 class SignupTests(TestCase):
     """Phase 0.6: self-serve sign-up creates User + Tenant + Membership."""
 

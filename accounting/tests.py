@@ -330,3 +330,185 @@ class TenantAwareAdminTests(TestCase):
         body = r.content.decode("utf-8", errors="replace")
         self.assertIn("BETA-ONLY-ACCOUNT", body)
         self.assertNotIn("ACME-ONLY-ACCOUNT", body)
+
+
+class SignupTests(TestCase):
+    """Phase 0.6: self-serve sign-up creates User + Tenant + Membership."""
+
+    def test_signup_page_renders(self):
+        r = self.client.get("/signup/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Create your books")
+
+    def test_signup_creates_user_tenant_membership_atomically(self):
+        User = get_user_model()
+        before_users = User.objects.count()
+        before_tenants = Tenant.objects.count()
+        r = self.client.post("/signup/", {
+            "username": "newco",
+            "email": "founder@newco.test",
+            "password1": "longenoughpw1",
+            "password2": "longenoughpw1",
+            "company_name": "New Co SARL",
+            "country": "Cameroon",
+        })
+        # Redirects to workspace
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, "/workspace/")
+
+        # User created
+        self.assertEqual(User.objects.count(), before_users + 1)
+        user = User.objects.get(username="newco")
+        self.assertEqual(user.email, "founder@newco.test")
+
+        # Tenant created with the right slug + owner pointer
+        self.assertEqual(Tenant.objects.count(), before_tenants + 1)
+        tenant = Tenant.objects.get(slug="new-co-sarl")
+        self.assertEqual(tenant.name, "New Co SARL")
+        self.assertEqual(tenant.country, "Cameroon")
+        self.assertEqual(tenant.owner_id, user.id)
+
+        # Membership created with role=owner
+        m = Membership.objects.get(user=user, tenant=tenant)
+        self.assertEqual(m.role, "owner")
+        self.assertTrue(m.active)
+
+    def test_signup_logs_user_in(self):
+        self.client.post("/signup/", {
+            "username": "loggedin",
+            "email": "x@x.test",
+            "password1": "longenoughpw1",
+            "password2": "longenoughpw1",
+            "company_name": "Login Co",
+        })
+        # The session has an authenticated user now
+        r = self.client.get("/workspace/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "loggedin")  # username in top bar
+
+    def test_signup_rejects_mismatched_passwords(self):
+        r = self.client.post("/signup/", {
+            "username": "x",
+            "email": "x@x.test",
+            "password1": "longenoughpw1",
+            "password2": "differentpw1",
+            "company_name": "X",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Passwords don&#x27;t match.")
+        User = get_user_model()
+        self.assertFalse(User.objects.filter(username="x").exists())
+
+    def test_signup_rejects_duplicate_username(self):
+        User = get_user_model()
+        User.objects.create_user("taken", "taken@x.test", "x")
+        r = self.client.post("/signup/", {
+            "username": "taken",
+            "email": "new@x.test",
+            "password1": "longenoughpw1",
+            "password2": "longenoughpw1",
+            "company_name": "Y",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "already taken")
+        # No tenant was created either
+        self.assertFalse(Tenant.objects.filter(slug="y").exists())
+
+    def test_signup_generates_unique_slug_when_company_name_clashes(self):
+        User = get_user_model()
+        first = User.objects.create_user("u1", "u1@x.test", "x")
+        Tenant.objects.create(slug="clash-co", name="Clash Co", owner=first)
+        r = self.client.post("/signup/", {
+            "username": "u2",
+            "email": "u2@x.test",
+            "password1": "longenoughpw1",
+            "password2": "longenoughpw1",
+            "company_name": "Clash Co",
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(Tenant.objects.filter(slug="clash-co-2").exists())
+
+    def test_signup_rejects_reserved_company_slug(self):
+        """A company name that slugifies to a reserved word should be suffixed."""
+        r = self.client.post("/signup/", {
+            "username": "adminish",
+            "email": "a@a.test",
+            "password1": "longenoughpw1",
+            "password2": "longenoughpw1",
+            "company_name": "Admin",
+        })
+        self.assertEqual(r.status_code, 302)
+        # Reserved 'admin' slug should be turned into 'admin-co' (or similar suffix).
+        self.assertFalse(Tenant.objects.filter(slug="admin").exists())
+        self.assertTrue(Tenant.objects.filter(slug="admin-co").exists())
+
+    def test_signup_authenticated_user_bounced_to_workspace(self):
+        User = get_user_model()
+        u = User.objects.create_user("already", "a@a.test", "x")
+        self.client.force_login(u)
+        r = self.client.get("/signup/")
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, "/workspace/")
+
+
+class TenantSwitcherTests(TestCase):
+    """Phase 0.6: the tenant switcher swaps request.tenant via the session."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_user("alice2", "a@a.test", "x")
+        cls.bob = User.objects.create_user("bob2", "b@b.test", "x")
+        cls.acme = _make_tenant("acme-sw")
+        cls.beta = _make_tenant("beta-sw")
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.alice, tenant=cls.beta, role="admin")
+        # Bob only belongs to acme — must NOT be allowed to switch to beta.
+        Membership.objects.create(user=cls.bob, tenant=cls.acme, role="viewer")
+
+    def test_switch_tenant_changes_active_tenant(self):
+        self.client.force_login(self.alice)
+        # First request: tenant defaults to whichever membership was earliest
+        # — order_by("created_at", "id") — which is acme.
+        r = self.client.get("/workspace/")
+        self.assertEqual(r.context["request"].tenant, self.acme)
+
+        # Switch to beta
+        r = self.client.post("/tenant/switch/beta-sw/")
+        self.assertEqual(r.status_code, 302)
+
+        # Subsequent request reads from session → beta
+        r = self.client.get("/workspace/")
+        self.assertEqual(r.context["request"].tenant, self.beta)
+
+    def test_switch_tenant_rejects_unauthorized_target(self):
+        self.client.force_login(self.bob)
+        r = self.client.post("/tenant/switch/beta-sw/")  # bob has no membership in beta
+        self.assertEqual(r.status_code, 302)
+        # Bob's active tenant stays acme
+        r = self.client.get("/workspace/")
+        self.assertEqual(r.context["request"].tenant, self.acme)
+
+    def test_switch_tenant_requires_authentication(self):
+        r = self.client.post("/tenant/switch/acme-sw/")
+        # Bounced to login
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.url.startswith("/?next=") or r.url.startswith("/accounts/login/"))
+
+    def test_switch_tenant_get_not_allowed(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/tenant/switch/acme-sw/")
+        self.assertEqual(r.status_code, 405)
+
+    def test_switcher_shown_in_workspace_when_user_has_multiple_memberships(self):
+        self.client.force_login(self.alice)  # 2 memberships
+        r = self.client.get("/workspace/")
+        self.assertContains(r, "ea-tenant-switcher")
+        # _make_tenant title-cases the slug, so "acme-sw" → "Acme-Sw SARL"
+        self.assertContains(r, self.acme.name)
+        self.assertContains(r, self.beta.name)
+
+    def test_switcher_hidden_when_user_has_one_membership(self):
+        self.client.force_login(self.bob)  # 1 membership only
+        r = self.client.get("/workspace/")
+        self.assertNotContains(r, "ea-tenant-switcher")

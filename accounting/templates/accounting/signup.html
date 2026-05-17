@@ -1,0 +1,156 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign up · EA Ledgers</title>
+<meta name="description" content="Start using EA Ledgers — SYSCOHADA-compliant accounting for OHADA SMEs.">
+
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+<!-- Slim top bar (matches landing.html) -->
+<header class="border-b border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+      <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+        <rect width="56" height="8"/>
+        <rect y="18" width="36" height="8"/>
+        <rect y="36" width="56" height="8"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+    </a>
+    <div class="hidden sm:flex items-center gap-3 text-xs text-neutral-500">
+      <span>SYSCOHADA · OHADA</span>
+      <span class="w-1 h-1 rounded-full bg-neutral-300"></span>
+      <span>FR · EN</span>
+    </div>
+  </div>
+</header>
+
+<!-- Sign-up stage -->
+<main class="flex-1 flex items-center justify-center px-6 py-10 bg-neutral-50">
+  <div class="w-full max-w-md">
+    <div class="card p-8">
+
+      <div class="flex justify-center mb-5">
+        <svg class="w-9 h-auto text-neutral-950" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/>
+          <rect y="18" width="36" height="8"/>
+          <rect y="36" width="56" height="8"/>
+        </svg>
+      </div>
+
+      <h1 class="h-section text-center mb-1">Create your books</h1>
+      <p class="text-sm text-neutral-500 text-center mb-6">Free to start. Your data is your own.</p>
+
+      {% if form.non_field_errors %}
+      <div class="mb-4 px-3 py-2.5 text-sm rounded-md bg-red-50 text-red-700 border border-red-200" role="alert">
+        {{ form.non_field_errors }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="" class="space-y-3.5" novalidate>
+        {% csrf_token %}
+
+        <div>
+          <label for="id_username" class="label">Username</label>
+          <input type="text" name="username" id="id_username" class="input"
+                 value="{{ form.username.value|default:'' }}"
+                 autocomplete="username" autofocus required>
+          {% if form.username.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.username.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="id_email" class="label">Email</label>
+          <input type="email" name="email" id="id_email" class="input"
+                 value="{{ form.email.value|default:'' }}"
+                 autocomplete="email" required>
+          {% if form.email.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.email.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="id_password1" class="label">Password</label>
+            <input type="password" name="password1" id="id_password1" class="input"
+                   autocomplete="new-password" required minlength="8">
+            {% if form.password1.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ form.password1.errors.0 }}</p>
+            {% endif %}
+          </div>
+          <div>
+            <label for="id_password2" class="label">Confirm</label>
+            <input type="password" name="password2" id="id_password2" class="input"
+                   autocomplete="new-password" required>
+            {% if form.password2.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ form.password2.errors.0 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="pt-1">
+          <div class="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Your company</div>
+        </div>
+
+        <div>
+          <label for="id_company_name" class="label">Company name</label>
+          <input type="text" name="company_name" id="id_company_name" class="input"
+                 value="{{ form.company_name.value|default:'' }}"
+                 autocomplete="organization" required>
+          {% if form.company_name.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.company_name.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <div>
+          <label for="id_country" class="label">Country <span class="text-neutral-400 font-normal normal-case tracking-normal">(optional)</span></label>
+          <input type="text" name="country" id="id_country" class="input"
+                 value="{{ form.country.value|default:'' }}"
+                 placeholder="e.g. Cameroon"
+                 autocomplete="country-name">
+          {% if form.country.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.country.errors.0 }}</p>
+          {% endif %}
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full mt-3">
+          Create account
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+
+      <p class="text-xs text-neutral-500 text-center mt-5">
+        Already have an account? <a href="/" class="text-neutral-950 font-medium underline underline-offset-2">Sign in</a>
+      </p>
+
+    </div>
+
+    <p class="mt-5 text-center text-xs text-neutral-500">
+      Multi-tenant accounting for SMEs in Sub-Saharan Africa.
+    </p>
+  </div>
+</main>
+
+<footer class="border-t border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div>v0.2 · OHADA · XAF</div>
+  </div>
+</footer>
+
+</body>
+</html>

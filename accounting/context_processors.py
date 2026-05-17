@@ -183,8 +183,25 @@ def _annotate_active(nav, current_path):
 
 
 def accounting_nav(request):
-    """Make NAV available to every template, with active flags resolved."""
+    """Make NAV available to every template, with active flags resolved.
+
+    Also exposes the user's active memberships so the tenant switcher in
+    the top bar can render. Always returns a list (possibly empty) under
+    ``user_memberships`` so templates can safely length-check it.
+    """
     import copy
     nav = copy.deepcopy(NAV)
     _annotate_active(nav, request.path)
-    return {"NAV": nav}
+
+    memberships = []
+    if getattr(request, "user", None) and request.user.is_authenticated:
+        # Lazy import: context processors run inside template rendering, so
+        # the app registry is guaranteed ready by now, but keeping the import
+        # local keeps the module import-safe in management commands.
+        from accounting.models import Membership
+        memberships = list(
+            Membership.objects.filter(user=request.user, active=True)
+            .select_related("tenant")
+            .order_by("tenant__name")
+        )
+    return {"NAV": nav, "user_memberships": memberships}

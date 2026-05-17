@@ -43,6 +43,10 @@ deploy_key
 deploy_key.pub
 *.tar.gz
 
+# Tailwind CLI binary (large, machine-specific; download via scripts/install-tailwind.sh)
+scripts/tailwindcss
+scripts/tailwindcss.exe
+
 # IDEs and OS
 .vscode/
 .idea/

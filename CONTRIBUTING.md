@@ -109,3 +109,24 @@ PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe manage.py runserver
 ```
 
 Then open http://127.0.0.1:8000/ and sign in.
+
+## CSS (Tailwind v4)
+
+The frontend uses Tailwind CSS v4 via the standalone CLI (no Node.js needed).
+
+**One-time setup** (downloads the ~126 MB binary into `scripts/`, gitignored):
+
+```bash
+scripts/install-tailwind.sh
+```
+
+**Build** (after editing `static_src/main.css` or adding Tailwind classes in templates):
+
+```bash
+scripts/build-css.sh            # one-shot, minified
+scripts/build-css.sh --watch    # watch mode for local dev
+```
+
+The build output `accounting/static/accounting/main.css` **is committed** to the repo — production deploys serve it via Django's `collectstatic` without needing the Tailwind binary on the server.
+
+Design tokens live in `static_src/main.css` under the `@theme` block. Neutral greys use Tailwind's built-in `neutral-*` scale (which matches our target hex values exactly); brand colour is `--color-brand` (#0D9488, teal-emerald) and creates utilities like `bg-brand`, `text-brand`, `border-brand`.

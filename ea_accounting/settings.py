@@ -84,13 +84,50 @@ TEMPLATES = [
 WSGI_APPLICATION = 'ea_accounting.wsgi.application'
 
 # --- Database ---------------------------------------------------------------
+#
+# Phase 0.3 — the app speaks both SQLite (dev default) and PostgreSQL
+# (production target). Driven by the ``DATABASE_URL`` env var:
+#
+#   - unset / blank → SQLite at ``BASE_DIR / db.sqlite3`` (existing behaviour)
+#   - postgres://USER:PASS@HOST:PORT/DB → Postgres via psycopg
+#
+# When DATABASE_URL points at Postgres, the ``TenantContextMiddleware``
+# additionally sets the session-local ``app.current_tenant_id`` variable so
+# the Row-Level Security policies installed in migration 0006 can filter
+# rows in the database layer as a defence-in-depth backstop.
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+def _parse_database_url(url):
+    """Tiny URL parser to avoid the dj-database-url dependency."""
+    from urllib.parse import urlparse, unquote, parse_qsl
+    p = urlparse(url)
+    if p.scheme not in ('postgres', 'postgresql'):
+        raise ValueError(
+            f'Unsupported DATABASE_URL scheme {p.scheme!r}; '
+            f'expected postgres:// or postgresql://'
+        )
+    options = dict(parse_qsl(p.query))
+    return {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': (p.path or '/').lstrip('/'),
+        'USER': unquote(p.username or ''),
+        'PASSWORD': unquote(p.password or ''),
+        'HOST': p.hostname or '',
+        'PORT': str(p.port) if p.port else '',
+        'OPTIONS': options,
+        'CONN_MAX_AGE': int(os.environ.get('DJANGO_DB_CONN_MAX_AGE', '60')),
     }
-}
+
+
+_DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+if _DATABASE_URL:
+    DATABASES = {'default': _parse_database_url(_DATABASE_URL)}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},

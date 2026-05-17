@@ -1,0 +1,147 @@
+/* ============================================================
+   EA Ledgers — Tailwind v4 design system
+   ============================================================
+   Input file. Built to accounting/static/accounting/main.css by
+   scripts/build-css.sh and collected by Django staticfiles.
+
+   Direction: Stripe / Linear style. Clean white surfaces, generous
+   whitespace, teal-emerald brand accent, sans-serif typography.
+   Mobile-first.
+
+   Greys: use Tailwind's built-in `neutral` palette directly
+   (neutral-50 == #FAFAFA, neutral-200 == #E5E5E5, etc.) — the
+   defaults map exactly to our desired tokens, so no overrides.
+   Custom tokens are reserved for the brand accent only.
+*/
+
+@import "tailwindcss";
+
+/* Scan Django templates for class usage so Tailwind tree-shakes properly. */
+@source "../accounting/templates/**/*.html";
+@source "../accounting/**/*.py";
+
+/* -----------------------------------------------------------
+   Brand tokens
+   ----------------------------------------------------------- */
+
+@theme {
+  /* Typography — Geist Sans loaded from Google Fonts. */
+  --font-sans: "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Brand: teal-emerald. Financial, trustworthy, not techbro purple. */
+  --color-brand: #0D9488;
+  --color-brand-dark: #0F766E;
+  --color-brand-darker: #115E59;
+  --color-brand-soft: #CCFBF1;
+  --color-brand-faint: #F0FDFA;
+}
+
+/* -----------------------------------------------------------
+   Base layer
+   ----------------------------------------------------------- */
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: theme(--color-neutral-50);
+    color: theme(--color-neutral-950);
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-darker);
+  }
+}
+
+/* -----------------------------------------------------------
+   Components (use only Tailwind utilities inside @apply)
+   ----------------------------------------------------------- */
+
+@layer components {
+  /* Buttons. Compose via class="btn btn-primary" (not @apply btn). */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white;
+  }
+  .btn-primary {
+    @apply text-white;
+    background: var(--color-brand);
+  }
+  .btn-primary:hover { background: var(--color-brand-dark); }
+  .btn-primary:focus-visible { --tw-ring-color: var(--color-brand); }
+
+  .btn-secondary {
+    @apply bg-white text-neutral-900 border border-neutral-300;
+  }
+  .btn-secondary:hover { @apply bg-neutral-100; }
+
+  .btn-ghost {
+    @apply text-neutral-700 bg-transparent;
+  }
+  .btn-ghost:hover { @apply bg-neutral-100 text-neutral-900; }
+
+  /* Inputs */
+  .input {
+    @apply block w-full rounded-md px-3 py-2 text-sm bg-white text-neutral-900 border border-neutral-300 transition;
+  }
+  .input::placeholder { @apply text-neutral-400; }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px var(--color-brand-soft);
+  }
+  .label {
+    @apply block text-xs font-medium text-neutral-700 mb-1.5;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white border border-neutral-200 rounded-lg;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+
+  /* Pills. Compose via class="pill pill-success". */
+  .pill {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full bg-neutral-100 text-neutral-700;
+  }
+  .pill-success {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-darker);
+  }
+  .pill-warning { @apply bg-amber-100 text-amber-800; }
+  .pill-danger { @apply bg-red-100 text-red-700; }
+  .pill-live::before {
+    content: '';
+    @apply inline-block w-1.5 h-1.5 rounded-full;
+    background: var(--color-brand);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  /* Typography helpers */
+  .h-display {
+    @apply text-3xl font-semibold tracking-tight text-neutral-950;
+  }
+  .h-section {
+    @apply text-lg font-semibold text-neutral-950;
+  }
+  .text-eyebrow {
+    @apply text-xs font-medium uppercase tracking-wider text-neutral-500;
+  }
+  .text-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

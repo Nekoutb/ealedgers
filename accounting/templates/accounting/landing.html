@@ -1,274 +1,103 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EA Ledgers — Elite Advisors</title>
-<meta name="description" content="Elite Advisors — EA Ledgers. SYSCOHADA-compliant accounting.">
+<title>Sign in · EA Ledgers</title>
+<meta name="description" content="EA Ledgers — SYSCOHADA-compliant accounting for OHADA-region SMEs.">
 
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%23000'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
 
+<!-- Geist Sans (display + mono) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-
-:root {
-  --ink: #000;
-  --bg:  #fff;
-  --muted: #6b6b6b;
-  --hairline: #000;
-  --font-display: 'Fraunces', 'Times New Roman', serif;
-  --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
-}
-
-html, body { height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-weight: 400;
-  font-size: 15px;
-  line-height: 1.45;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow-x: hidden;
-}
-
-/* ===== Top bar (minimal) ===== */
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24px 32px;
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-.topbar .small-mark { display: flex; align-items: center; gap: 10px; }
-.topbar .small-mark svg { width: 18px; height: auto; }
-.topbar .meta { color: var(--muted); }
-
-/* ===== Main centered card ===== */
-.stage {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 24px 48px;
-}
-
-.card {
-  width: 100%;
-  max-width: 380px;
-  text-align: center;
-}
-
-.logo {
-  display: block;
-  width: 64px;
-  height: auto;
-  margin: 0 auto 28px;
-  color: var(--ink);
-}
-
-.brand-name {
-  font-family: var(--font-sans);
-  font-size: 12px;
-  letter-spacing: 0.36em;
-  text-transform: uppercase;
-  font-weight: 500;
-  margin-bottom: 10px;
-}
-
-.product-name {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  font-size: 22px;
-  letter-spacing: -0.005em;
-  color: var(--ink);
-  margin-bottom: 48px;
-  font-variation-settings: 'opsz' 18;
-}
-.product-name::before, .product-name::after {
-  content: '';
-  display: inline-block;
-  width: 18px;
-  height: 1px;
-  background: var(--ink);
-  vertical-align: middle;
-  margin: 0 12px 4px;
-}
-
-/* ===== Form ===== */
-.errorbox {
-  border: 1px solid var(--ink);
-  padding: 10px 14px;
-  font-size: 12px;
-  letter-spacing: 0.05em;
-  margin-bottom: 18px;
-  text-align: left;
-}
-
-.form { display: flex; flex-direction: column; gap: 20px; text-align: left; }
-
-.field { display: flex; flex-direction: column; gap: 6px; }
-
-.field label {
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.field input {
-  border: 0;
-  border-bottom: 1px solid var(--ink);
-  border-radius: 0;
-  padding: 8px 0 10px;
-  font-family: inherit;
-  font-size: 16px;
-  background: transparent;
-  color: var(--ink);
-  outline: none;
-  transition: padding-bottom 0.15s ease, border-bottom-width 0.15s ease;
-}
-.field input:focus {
-  border-bottom-width: 2px;
-  padding-bottom: 9px;
-}
-
-.submit {
-  margin-top: 12px;
-  padding: 16px 24px;
-  background: var(--ink);
-  color: var(--bg);
-  border: 1px solid var(--ink);
-  font-family: inherit;
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-.submit::after {
-  content: '→';
-  font-family: var(--font-display);
-  font-style: italic;
-  transition: transform 0.18s ease;
-}
-.submit:hover { background: var(--bg); color: var(--ink); }
-.submit:hover::after { transform: translateX(4px); }
-
-/* ===== Footer ===== */
-.foot {
-  padding: 20px 32px 28px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  font-weight: 500;
-  color: var(--muted);
-  gap: 16px;
-}
-.foot .center {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 13px;
-  color: var(--ink);
-}
-
-/* ===== Reveal animation ===== */
-@keyframes rise {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.topbar  { animation: rise 0.6s cubic-bezier(0.2,0.7,0.2,1) both; }
-.logo    { animation: rise 0.8s cubic-bezier(0.2,0.7,0.2,1) 0.1s both; }
-.brand-name { animation: rise 0.8s cubic-bezier(0.2,0.7,0.2,1) 0.2s both; }
-.product-name { animation: rise 0.8s cubic-bezier(0.2,0.7,0.2,1) 0.28s both; }
-.errorbox, .form { animation: rise 0.9s cubic-bezier(0.2,0.7,0.2,1) 0.38s both; }
-.foot    { animation: rise 0.9s cubic-bezier(0.2,0.7,0.2,1) 0.5s both; }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-
-/* ===== Responsive ===== */
-@media (max-width: 600px) {
-  .topbar { padding: 16px 20px; font-size: 10px; }
-  .foot { padding: 16px 20px 24px; flex-direction: column; gap: 8px; }
-  .stage { padding: 16px 20px 32px; }
-  .product-name { font-size: 19px; margin-bottom: 36px; }
-}
-</style>
+<!-- Compiled Tailwind output -->
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
 </head>
-<body>
 
-<header class="topbar">
-  <div class="small-mark">
-    <svg viewBox="0 0 60 44" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true">
-      <rect width="56" height="8"/>
-      <rect y="18" width="36" height="8"/>
-      <rect y="36" width="56" height="8"/>
-    </svg>
-    <span>Elite Advisors</span>
+<body class="min-h-screen flex flex-col">
+
+<!-- Slim top bar -->
+<header class="border-b border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <a href="/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+      <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+        <rect width="56" height="8"/>
+        <rect y="18" width="36" height="8"/>
+        <rect y="36" width="56" height="8"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+    </a>
+    <div class="hidden sm:flex items-center gap-3 text-xs text-neutral-500">
+      <span>SYSCOHADA · OHADA</span>
+      <span class="w-1 h-1 rounded-full bg-neutral-300"></span>
+      <span>FR · EN</span>
+    </div>
   </div>
-  <div class="meta">CEMAC · SYSCOHADA</div>
 </header>
 
-<main class="stage">
-  <div class="card">
-    <svg class="logo" viewBox="0 0 60 44" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true">
-      <rect width="56" height="8"/>
-      <rect y="18" width="36" height="8"/>
-      <rect y="36" width="56" height="8"/>
-    </svg>
+<!-- Sign-in stage -->
+<main class="flex-1 flex items-center justify-center px-6 py-12">
+  <div class="w-full max-w-sm">
+    <div class="card p-8">
 
-    <div class="brand-name">Elite Advisors</div>
-    <div class="product-name">EA Ledgers</div>
-
-    {% if form.errors %}
-    <div class="errorbox">Invalid username or password. Try again.</div>
-    {% endif %}
-
-    <form class="form" method="post" action="">
-      {% csrf_token %}
-      <div class="field">
-        <label for="id_username">Username</label>
-        <input type="text" name="username" id="id_username" autocomplete="username" autofocus required>
+      <!-- Logo -->
+      <div class="flex justify-center mb-6">
+        <svg class="w-9 h-auto text-neutral-950" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/>
+          <rect y="18" width="36" height="8"/>
+          <rect y="36" width="56" height="8"/>
+        </svg>
       </div>
-      <div class="field">
-        <label for="id_password">Password</label>
-        <input type="password" name="password" id="id_password" autocomplete="current-password" required>
+
+      <!-- Heading -->
+      <h1 class="h-section text-center mb-1">Welcome back</h1>
+      <p class="text-sm text-neutral-500 text-center mb-6">Sign in to your books.</p>
+
+      {% if form.errors %}
+      <div class="mb-4 px-3 py-2.5 text-sm rounded-md bg-red-50 text-red-700 border border-red-200" role="alert">
+        Username or password is incorrect.
       </div>
-      <input type="hidden" name="next" value="{{ next|default:'/admin/' }}">
-      <button type="submit" class="submit">Sign in</button>
-    </form>
+      {% endif %}
+
+      <form method="post" action="" class="space-y-4" novalidate>
+        {% csrf_token %}
+        <div>
+          <label for="id_username" class="label">Username</label>
+          <input type="text" name="username" id="id_username"
+                 class="input" autocomplete="username"
+                 autofocus required>
+        </div>
+        <div>
+          <label for="id_password" class="label">Password</label>
+          <input type="password" name="password" id="id_password"
+                 class="input" autocomplete="current-password" required>
+        </div>
+        <input type="hidden" name="next" value="{{ next|default:'/workspace/' }}">
+        <button type="submit" class="btn btn-primary w-full mt-2">
+          Sign in
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+
+    </div>
+
+    <p class="mt-6 text-center text-xs text-neutral-500">
+      Multi-tenant accounting for SMEs in Sub-Saharan Africa.
+    </p>
   </div>
 </main>
 
-<footer class="foot">
-  <div>© Elite Advisors</div>
-  <div class="center">Books, kept in good order.</div>
-  <div>v0.1</div>
+<!-- Footer -->
+<footer class="border-t border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div>v0.2 · OHADA · XAF</div>
+  </div>
 </footer>
 
 </body>

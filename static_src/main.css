@@ -139,6 +139,106 @@
     font-family: var(--font-mono);
     font-feature-settings: "tnum" 1;
   }
+
+  /* -----------------------------------------------------------
+     Reports & dashboard helpers
+     ----------------------------------------------------------- */
+
+  /* Page header — eyebrow + h1 + meta sitting above content */
+  .page-head {
+    @apply flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 pb-5 mb-8 border-b border-neutral-200;
+  }
+  .page-head .meta {
+    @apply text-xs text-neutral-500;
+    font-family: var(--font-mono);
+  }
+  .page-head .meta strong { @apply text-neutral-900 font-semibold; }
+
+  /* KPI strip */
+  .kpi-row {
+    @apply grid gap-3 mb-8;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+  .kpi {
+    @apply bg-white border border-neutral-200 rounded-lg px-4 py-3;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .kpi .label {
+    @apply text-xs font-medium uppercase tracking-wider text-neutral-500;
+  }
+  .kpi .value {
+    @apply text-2xl font-semibold tracking-tight text-neutral-950 mt-1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Data table — striped white card with neutral headers + emphasised tfoot */
+  .dt {
+    @apply w-full bg-white border border-neutral-200 rounded-lg overflow-hidden;
+    border-collapse: separate;
+    border-spacing: 0;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .dt thead th {
+    @apply bg-neutral-50 border-b border-neutral-200 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-neutral-600;
+  }
+  .dt thead th.num,
+  .dt tbody td.num,
+  .dt tfoot td.num {
+    @apply text-right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .dt tbody td {
+    @apply px-4 py-3 border-b border-neutral-100 text-sm text-neutral-700 align-top;
+  }
+  .dt tbody tr:last-child td { border-bottom: 0; }
+  .dt tbody tr:hover td { @apply bg-neutral-50; }
+  .dt tfoot td {
+    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wider text-neutral-700 bg-neutral-50 border-t border-neutral-200;
+  }
+  .dt .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .dt .num-neg { color: #b91c1c; }
+  .dt .num-pos { color: var(--color-brand-darker); }
+
+  /* Empty-state placeholder */
+  .empty {
+    @apply bg-white border border-dashed border-neutral-300 rounded-lg px-6 py-14 text-center text-sm text-neutral-500;
+  }
+  .empty a {
+    color: var(--color-brand-dark);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* Pill modifiers */
+  .pill-draft   { @apply bg-amber-100 text-amber-800; }
+  .pill-neutral { @apply bg-neutral-100 text-neutral-700; }
+
+  /* Bank/cash balance tile (dashboard) */
+  .bank-card {
+    @apply bg-white border border-neutral-200 rounded-lg p-5 flex flex-col gap-2;
+    border-left: 3px solid var(--color-brand);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .bank-card.cash { border-left-color: #d97706; /* amber-600 */ }
+
+  /* Quick-action card with accent icon tile */
+  .action-card {
+    @apply bg-white border border-neutral-200 rounded-lg p-4 flex items-center gap-4 transition;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .action-card:hover {
+    @apply border-neutral-300;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px -10px rgb(13 148 136 / 0.20), 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .action-icon {
+    @apply w-11 h-11 rounded-md flex items-center justify-center flex-none;
+  }
+  .action-icon svg { @apply w-5 h-5; }
 }
 
 @keyframes pulse {

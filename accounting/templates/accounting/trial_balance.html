@@ -4,20 +4,26 @@
 {% block page_title %}Trial Balance{% endblock %}
 
 {% block content %}
-{% with active_nav="trial_balance" %}{% endwith %}
 
 <section class="page-head">
   <div>
-    <div class="eyebrow">Reports · Trial Balance</div>
-    <h1>Trial <em>Balance.</em></h1>
+    <p class="text-eyebrow mb-2">Reports · Trial Balance</p>
+    <h1 class="h-display">Trial Balance</h1>
   </div>
   <div class="meta">
     <div><strong>{{ tenant_name }}</strong></div>
-    <div>{% if balanced %}<span style="color: var(--emerald);">BALANCED ✓</span>{% else %}<span style="color: var(--terracotta);">OUT OF BALANCE</span>{% endif %}</div>
+    <div>
+      {% if balanced %}
+        <span class="pill pill-success">Balanced ✓</span>
+      {% else %}
+        <span class="pill pill-danger">Out of balance</span>
+      {% endif %}
+    </div>
   </div>
 </section>
 
 {% if rows %}
+<div class="overflow-x-auto">
 <table class="dt">
   <thead>
     <tr>
@@ -32,12 +38,12 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td class="mono"><strong>{{ r.code }}</strong></td>
+      <td class="mono font-semibold text-neutral-950">{{ r.code }}</td>
       <td>{{ r.name }}</td>
-      <td><span class="pill">{{ r.type }}</span></td>
+      <td><span class="pill pill-neutral">{{ r.type }}</span></td>
       <td class="num">{{ r.debit|floatformat:0|intcomma }}</td>
       <td class="num">{{ r.credit|floatformat:0|intcomma }}</td>
-      <td class="num {% if r.balance < 0 %}neg{% elif r.balance > 0 %}pos{% endif %}">{{ r.balance|floatformat:0|intcomma }}</td>
+      <td class="num {% if r.balance < 0 %}num-neg{% elif r.balance > 0 %}num-pos{% endif %}">{{ r.balance|floatformat:0|intcomma }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -50,8 +56,12 @@
     </tr>
   </tfoot>
 </table>
+</div>
 {% else %}
-<div class="empty">No posted entries yet.<br>Post your first journal entry to populate the trial balance.</div>
+<div class="empty">
+  No posted entries yet.<br>
+  Post your first journal entry to populate the trial balance.
+</div>
 {% endif %}
 
 {% endblock %}

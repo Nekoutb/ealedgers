@@ -4,12 +4,11 @@
 {% block page_title %}{{ title }}{% endblock %}
 
 {% block content %}
-{% if partner_kind == "Customer" %}{% with active_nav="customer_aging" %}{% endwith %}{% else %}{% with active_nav="supplier_aging" %}{% endwith %}{% endif %}
 
 <section class="page-head">
   <div>
-    <div class="eyebrow">Reports · {{ title }}</div>
-    <h1>{{ partner_kind }} <em>Aging.</em></h1>
+    <p class="text-eyebrow mb-2">Reports · {{ title }}</p>
+    <h1 class="h-display">{{ partner_kind }} Aging</h1>
   </div>
   <div class="meta">
     <div><strong>{{ tenant_name }}</strong></div>
@@ -18,6 +17,7 @@
 </section>
 
 {% if rows %}
+<div class="overflow-x-auto">
 <table class="dt">
   <thead>
     <tr>
@@ -38,8 +38,8 @@
       <td class="num">{{ r.b30|floatformat:0|intcomma }}</td>
       <td class="num">{{ r.b60|floatformat:0|intcomma }}</td>
       <td class="num">{{ r.b90|floatformat:0|intcomma }}</td>
-      <td class="num {% if r.over > 0 %}neg{% endif %}">{{ r.over|floatformat:0|intcomma }}</td>
-      <td class="num"><strong>{{ r.total|floatformat:0|intcomma }}</strong></td>
+      <td class="num {% if r.over > 0 %}num-neg{% endif %}">{{ r.over|floatformat:0|intcomma }}</td>
+      <td class="num font-semibold text-neutral-950">{{ r.total|floatformat:0|intcomma }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -55,6 +55,7 @@
     </tr>
   </tfoot>
 </table>
+</div>
 {% else %}
 <div class="empty">No open {{ partner_kind|lower }} balances right now.</div>
 {% endif %}

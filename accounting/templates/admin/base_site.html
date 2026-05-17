@@ -257,6 +257,8 @@ div.breadcrumbs a:hover { color: var(--color-brand-darker); text-decoration: und
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+  /* Positioning context for absolutely-placed .object-tools (see below). */
+  position: relative;
 }
 @media (max-width: 900px) { #content { padding: 20px 16px 40px; } }
 
@@ -288,7 +290,12 @@ div.breadcrumbs a:hover { color: var(--color-brand-darker); text-decoration: und
 }
 
 /* ============ INDEX / SITE ADMINISTRATION ============ */
-#content-main { display: grid; gap: 16px; }
+/* IMPORTANT: scope to body.dashboard only. The bare `#content-main`
+   selector applies on EVERY admin page — change_list, change_form,
+   etc. — and turning that into a grid breaks the changelist layout
+   (table + filter sidebar + object-tools become stacked grid rows
+   with no space for the filter to sit beside the table). */
+body.dashboard #content-main { display: grid; gap: 16px; }
 
 /* IMPORTANT: only `div.module`, not bare `.app-accounting` / `.app-auth`.
    Django's admin adds `app-{appname}` classes to <body> on every page
@@ -411,8 +418,9 @@ div.module {
 }
 
 @media (min-width: 1024px) {
-  #content-main { grid-template-columns: 2fr 1fr; align-items: start; }
-  #content-related { margin: 0; padding: 0; }
+  /* Same dashboard-only scoping — only the index page should be 2-col. */
+  body.dashboard #content-main { grid-template-columns: 2fr 1fr; align-items: start; }
+  body.dashboard #content-related { margin: 0; padding: 0; }
 }
 
 /* ============ CHANGE LIST ============ */
@@ -568,7 +576,29 @@ div.module {
 .paginator .end { font-weight: 600; }
 
 /* ============ CHANGE FORM ============ */
-.object-tools { float: right; margin-bottom: 0; }
+/* Pin the "Add X" / "History" toolset to the top-right of the page
+   instead of relying on Django's float + negative-margin trick. Two
+   reasons this had to change:
+   1. Django's `responsive.css` zeros out `float: right` at some
+      viewport widths, but `base.css`'s `margin-top: -48px` still
+      pulls the toolset up — and lands it on top of the page <h1>.
+   2. Absolute positioning is just simpler and survives both stylesheets. */
+.object-tools {
+  position: absolute !important;
+  top: 28px;
+  right: 24px;
+  margin: 0 !important;
+  padding: 0 !important;
+  float: none !important;
+  z-index: 5;
+}
+/* On narrow viewports drop back to inline flow under the heading. */
+@media (max-width: 767px) {
+  .object-tools {
+    position: static !important;
+    margin: 0 0 16px !important;
+  }
+}
 .object-tools a, .object-tools li a {
   background: var(--color-brand) !important;
   color: #fff !important;

@@ -1,373 +1,131 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Workspace · {{ tenant_name }} · EA Ledgers</title>
-
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%231A1815'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<title>Apps · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..500;1,9..144,300..500&family=Public+Sans:wght@300..700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-
-:root {
-  --bg: #F5F2EA;
-  --surface: #FFFFFF;
-  --ink: #1A1815;
-  --muted: #6E6862;
-  --hairline: #E2DCD0;
-  --header-bg: #1A1815;
-  --header-fg: #F5F2EA;
-  --accent: #0B6E4F;
-  --font-display: 'Fraunces', 'Times New Roman', serif;
-  --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
-}
-
-html, body { min-height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Subtle paper grain */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.4;
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* ===================================================== HEADER ===== */
-.topbar {
-  background: var(--header-bg);
-  color: var(--header-fg);
-  padding: 16px 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  position: relative;
-  z-index: 2;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: var(--header-fg);
-  text-decoration: none;
-}
-.brand .mark { width: 22px; height: auto; flex: none; }
-.brand .name {
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  font-size: 13px;
-}
-.brand .product {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  font-size: 17px;
-  color: rgba(245, 242, 234, 0.65);
-  font-variation-settings: 'opsz' 18;
-}
-.crew {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  font-size: 12px;
-}
-.tenant {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 14px 7px 12px;
-  border: 1px solid rgba(245, 242, 234, 0.25);
-  border-radius: 100px;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-.tenant::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-  border-radius: 50%;
-}
-.user-name { font-weight: 500; letter-spacing: 0.08em; }
-.logout {
-  background: transparent;
-  border: 1px solid rgba(245, 242, 234, 0.3);
-  color: var(--header-fg);
-  font: inherit;
-  font-family: var(--font-sans);
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  font-weight: 600;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: background 0.18s, color 0.18s;
-}
-.logout:hover { background: var(--header-fg); color: var(--header-bg); }
-
-/* ===================================================== STAGE ===== */
-.stage {
-  position: relative;
-  z-index: 1;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 32px;
-  gap: 56px;
-}
-
-.greeting {
-  text-align: center;
-}
-.greeting .eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 600;
-  margin-bottom: 14px;
-}
-.greeting h1 {
-  font-family: var(--font-display);
-  font-weight: 350;
-  font-size: clamp(36px, 5vw, 56px);
-  line-height: 1.0;
-  letter-spacing: -0.025em;
-  color: var(--ink);
-  font-variation-settings: 'opsz' 144;
-}
-.greeting h1 em { font-style: italic; font-weight: 350; }
-
-/* ===================================================== APPS GRID ===== */
-.apps {
-  display: grid;
-  grid-template-columns: repeat(3, 132px);
-  grid-template-rows: repeat(3, auto);
-  gap: 28px 36px;
-  justify-content: center;
-  align-content: center;
-}
-
-.app {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  color: inherit;
-  position: relative;
-  padding: 8px;
-}
-
-.app .tile {
-  width: 88px;
-  height: 88px;
-  border-radius: 22px;
-  overflow: hidden;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px -2px rgba(26, 24, 21, 0.18);
-  transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1),
-              box-shadow 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.app .tile svg { width: 100%; height: 100%; display: block; }
-
-.app .name {
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--ink);
-  text-align: center;
-  line-height: 1.25;
-}
-.app .tagline {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0;
-  text-align: center;
-  font-variation-settings: 'opsz' 14;
-}
-
-/* Live module — clickable, hover lift */
-.app.live { cursor: pointer; }
-.app.live:hover .tile {
-  transform: translateY(-4px) scale(1.04);
-  box-shadow: 0 14px 28px -10px rgba(11, 110, 79, 0.45);
-}
-.app.live:focus-visible {
-  outline: none;
-}
-.app.live:focus-visible .tile {
-  box-shadow: 0 0 0 3px rgba(11, 110, 79, 0.35);
-}
-.app.live::after {
-  content: 'Live';
-  position: absolute;
-  top: 4px;
-  right: -2px;
-  background: var(--accent);
-  color: white;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 3px 7px;
-  border-radius: 100px;
-  box-shadow: 0 2px 4px rgba(11, 110, 79, 0.35);
-}
-
-/* Soon module — muted, not clickable */
-.app.soon { cursor: not-allowed; }
-.app.soon .tile {
-  opacity: 0.62;
-  filter: saturate(0.85);
-}
-.app.soon .name { color: var(--muted); }
-.app.soon:hover .tile { opacity: 0.78; }
-
-/* ===================================================== FOOTER ===== */
-.foot {
-  position: relative;
-  z-index: 1;
-  padding: 24px 40px 32px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 24px;
-  align-items: center;
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 500;
-  border-top: 1px solid var(--hairline);
-}
-.foot .center {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 300;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 13px;
-  color: var(--ink);
-}
-.foot .right { text-align: right; }
-
-/* ===================================================== ANIMATION ===== */
-@keyframes rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.topbar   { animation: rise 0.6s cubic-bezier(0.2,0.7,0.2,1) both; }
-.greeting { animation: rise 0.8s cubic-bezier(0.2,0.7,0.2,1) 0.1s both; }
-.app:nth-child(1) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.20s both; }
-.app:nth-child(2) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.26s both; }
-.app:nth-child(3) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.32s both; }
-.app:nth-child(4) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.34s both; }
-.app:nth-child(5) { animation: rise 0.8s cubic-bezier(0.2,0.7,0.2,1) 0.40s both; }
-.app:nth-child(6) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.46s both; }
-.app:nth-child(7) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.48s both; }
-.app:nth-child(8) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.54s both; }
-.app:nth-child(9) { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.60s both; }
-.foot     { animation: rise 0.7s cubic-bezier(0.2,0.7,0.2,1) 0.70s both; }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-
-/* ===================================================== RESPONSIVE ===== */
-@media (max-width: 720px) {
-  .topbar { padding: 14px 20px; flex-wrap: wrap; gap: 12px; }
-  .crew { flex-wrap: wrap; gap: 10px; }
-  .tenant { font-size: 10px; padding: 6px 10px 6px 9px; }
-  .stage { padding: 28px 16px; gap: 36px; }
-  .apps { grid-template-columns: repeat(3, 92px); gap: 18px 16px; }
-  .app .tile { width: 64px; height: 64px; border-radius: 16px; }
-  .app .name { font-size: 11px; }
-  .app .tagline { display: none; }
-  .greeting h1 { font-size: 28px; }
-  .foot { grid-template-columns: 1fr; text-align: center; gap: 8px; padding: 16px 20px 24px; }
-  .foot .right { text-align: center; }
-}
-</style>
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
 </head>
-<body>
 
-<header class="topbar">
-  <a class="brand" href="/workspace/">
-    <svg class="mark" viewBox="0 0 60 44" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect width="56" height="8"/>
-      <rect y="18" width="36" height="8"/>
-      <rect y="36" width="56" height="8"/>
-    </svg>
-    <span class="name">Elite Advisors</span>
-    <span class="product">EA Ledgers</span>
-  </a>
-  <div class="crew">
-    <span class="tenant" title="Active tenant">{{ tenant_name }}</span>
-    <span class="user-name">{{ user.username }}</span>
-    <form method="post" action="/admin/logout/" style="display:inline">
-      {% csrf_token %}
-      <button type="submit" class="logout">Log out</button>
-    </form>
+<body class="min-h-screen flex flex-col">
+
+<!-- ============ TOP BAR ============ -->
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+
+    <!-- Logo + product -->
+    <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+      <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+        <rect width="56" height="8"/>
+        <rect y="18" width="36" height="8"/>
+        <rect y="36" width="56" height="8"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+    </a>
+
+    <!-- Right side: tenant + user -->
+    <div class="flex items-center gap-2">
+      <div class="hidden sm:inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-700">
+        <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-brand);"></span>
+        {{ tenant_name }}
+      </div>
+      <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+      <form method="post" action="/admin/logout/">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-ghost text-xs">Sign out</button>
+      </form>
+    </div>
+
   </div>
 </header>
 
-<main class="stage">
-  <section class="greeting">
-    <div class="eyebrow">Welcome back · {{ user.username }}</div>
-    <h1>Your <em>modules.</em></h1>
+<!-- ============ STAGE ============ -->
+<main class="flex-1 max-w-7xl mx-auto w-full px-6 py-12">
+
+  <!-- Heading -->
+  <section class="mb-10">
+    <p class="text-eyebrow mb-2">Welcome back, {{ user.username }}</p>
+    <h1 class="h-display">Apps</h1>
+    <p class="text-sm text-neutral-500 mt-2">Open a module to start working.</p>
   </section>
 
-  <section class="apps" aria-label="Modules">
-    {% for mod in modules %}
-      {% if mod.url %}
-      <a class="app live" href="{{ mod.url }}" aria-label="Open {{ mod.name }}">
-      {% else %}
-      <div class="app soon" role="button" aria-disabled="true" aria-label="{{ mod.name }} — Coming soon">
-      {% endif %}
-        <div class="tile">{{ mod.icon|safe }}</div>
-        <div class="name">{{ mod.name }}</div>
-        <div class="tagline">{{ mod.tagline }}</div>
-      {% if mod.url %}</a>{% else %}</div>{% endif %}
-    {% endfor %}
+  <!-- App grid -->
+  <section aria-label="Modules">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+      {% for mod in modules %}
+        {% if mod.url %}
+        <a href="{{ mod.url }}"
+           class="app-card-live group card p-5 flex flex-col gap-3 hover:border-neutral-300 transition cursor-pointer"
+           style="--card-hover-shadow: 0 8px 24px -8px rgb(13 148 136 / 0.20);">
+          <div class="flex items-start justify-between">
+            <div class="w-11 h-11 rounded-md flex items-center justify-center"
+                 style="background: var(--color-brand);">
+              <span class="text-white">{{ mod.icon|safe }}</span>
+            </div>
+            <span class="pill pill-success pill-live">Live</span>
+          </div>
+          <div>
+            <div class="text-base font-semibold text-neutral-950">{{ mod.name }}</div>
+            <div class="text-sm text-neutral-500 mt-0.5">{{ mod.tagline }}</div>
+          </div>
+          <div class="mt-auto pt-3 border-t border-neutral-100 flex items-center justify-between text-xs">
+            <span class="text-neutral-500">Open module</span>
+            <span class="text-neutral-400 group-hover:text-neutral-700 group-hover:translate-x-0.5 transition">→</span>
+          </div>
+        </a>
+        {% else %}
+        <div class="app-card-soon card p-5 flex flex-col gap-3 opacity-70" aria-disabled="true">
+          <div class="flex items-start justify-between">
+            <div class="w-11 h-11 rounded-md flex items-center justify-center bg-neutral-100">
+              <span class="text-neutral-400">{{ mod.icon|safe }}</span>
+            </div>
+            <span class="pill">Soon</span>
+          </div>
+          <div>
+            <div class="text-base font-semibold text-neutral-700">{{ mod.name }}</div>
+            <div class="text-sm text-neutral-500 mt-0.5">{{ mod.tagline }}</div>
+          </div>
+          <div class="mt-auto pt-3 border-t border-neutral-100 flex items-center justify-between text-xs">
+            <span class="text-neutral-400">Coming soon</span>
+            <span class="text-neutral-300">—</span>
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+
+    </div>
   </section>
+
 </main>
 
-<footer class="foot">
-  <div>© Elite Advisors</div>
-  <div class="center">Books, kept in good order.</div>
-  <div class="right">v0.1</div>
+<!-- ============ FOOTER ============ -->
+<footer class="border-t border-neutral-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div class="text-mono">v0.2</div>
+  </div>
 </footer>
 
+<style>
+  /* Reset the colored icon tiles: each module's SVG comes with its own
+     <rect width="32" height="32" fill="HEX">. We want them all to render
+     white on the brand-colored container instead, so override fill. */
+  .app-card-live .w-11 svg rect:first-of-type { fill: transparent !important; }
+  .app-card-live .w-11 svg :not(rect:first-of-type) { fill: white; stroke: white; }
+  .app-card-soon .w-11 svg rect:first-of-type { fill: transparent !important; }
+  .app-card-soon .w-11 svg :not(rect:first-of-type) { fill: theme(--color-neutral-400); stroke: theme(--color-neutral-400); }
+  .app-card-live { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
+  .app-card-live:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -8px rgb(13 148 136 / 0.25), 0 2px 4px rgb(0 0 0 / 0.04);
+  }
+</style>
 </body>
 </html>

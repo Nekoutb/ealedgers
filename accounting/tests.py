@@ -208,3 +208,125 @@ class TenantContextMiddlewareTests(TestCase):
         # default should be acme.
         req = self._mw_request(self.alice)
         self.assertEqual(req.tenant, self.acme)
+
+
+class TenantAwareViewTests(TestCase):
+    """Phase 0.2b: views use Model.objects.for_tenant(request.tenant) and
+    show only the current tenant's data, never the other tenant's."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.alice = User.objects.create_user("alice", "alice@a.test", "x")
+        cls.bob = User.objects.create_user("bob", "bob@b.test", "x")
+        cls.acme = _make_tenant("acme", currency=cls.xaf, owner=cls.alice)
+        cls.beta = _make_tenant("beta", currency=cls.xaf, owner=cls.bob, business_type="goods")
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
+
+        # Each tenant gets one identifiable account that the OTHER tenant
+        # must never see.
+        Account.objects.create(
+            tenant=cls.acme, code="ACME-CASH", name="Acme Cash Account",
+            type="asset_cash",
+        )
+        Account.objects.create(
+            tenant=cls.beta, code="BETA-CASH", name="Beta Cash Account",
+            type="asset_cash",
+        )
+
+    def test_alice_dashboard_shows_only_acme_data(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/")
+        self.assertEqual(r.status_code, 200)
+        # Alice's tenant context is acme → dashboard counts must reflect acme only
+        # (1 account, not 2 across both tenants).
+        # We assert against the rendered counters via the response context.
+        counters = r.context["counters"]
+        self.assertEqual(counters["accounts_count"], 1)
+        self.assertEqual(r.context["tenant_name"], "Acme SARL")
+
+    def test_bob_dashboard_shows_only_beta_data(self):
+        self.client.force_login(self.bob)
+        r = self.client.get("/accounting/")
+        self.assertEqual(r.status_code, 200)
+        counters = r.context["counters"]
+        self.assertEqual(counters["accounts_count"], 1)
+        self.assertEqual(r.context["tenant_name"], "Beta SARL")
+
+    def test_trial_balance_isolated_by_tenant(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/reports/trial-balance/")
+        self.assertEqual(r.status_code, 200)
+        # Neither tenant has posted entries yet, so 0 rows is expected.
+        # Important assertion: tenant_name is Acme (not Beta).
+        self.assertEqual(r.context["tenant_name"], "Acme SARL")
+
+    def test_fixed_assets_register_isolated_by_tenant(self):
+        from accounting.models import Journal as J, FixedAsset
+        # Give Acme one fixed asset; Beta gets none.
+        j = J.objects.create(tenant=self.acme, code="OD", name="Misc", type="general")
+        a = Account.objects.create(
+            tenant=self.acme, code="ACME-244", name="Office equipment", type="asset_fixed",
+        )
+        b = Account.objects.create(
+            tenant=self.acme, code="ACME-2844", name="Accum depr office equipment",
+            type="asset_fixed",
+        )
+        c = Account.objects.create(
+            tenant=self.acme, code="ACME-6813", name="Depr expense", type="expense_depreciation",
+        )
+        FixedAsset.objects.create(
+            tenant=self.acme, code="ACME-A1", name="Laptop",
+            purchase_date=date.today(), in_service_date=date.today(),
+            purchase_cost=Decimal("1000000"), useful_life_months=36,
+            asset_account=a, accumulated_depreciation_account=b,
+            depreciation_expense_account=c, depreciation_journal=j,
+        )
+
+        # Alice (acme) sees 1 asset; Bob (beta) sees 0.
+        self.client.force_login(self.alice)
+        r = self.client.get("/accounting/reports/fixed-assets-register/")
+        self.assertEqual(len(r.context["assets"]), 1)
+
+        self.client.force_login(self.bob)
+        r = self.client.get("/accounting/reports/fixed-assets-register/")
+        self.assertEqual(len(r.context["assets"]), 0)
+
+
+class TenantAwareAdminTests(TestCase):
+    """Phase 0.2b: Django admin list views are filtered to request.tenant."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        # Superusers so we can hit admin pages without role gymnastics.
+        cls.alice = User.objects.create_superuser("alice", "alice@a.test", "x")
+        cls.bob = User.objects.create_superuser("bob", "bob@b.test", "x")
+        cls.acme = _make_tenant("acme", currency=cls.xaf, owner=cls.alice)
+        cls.beta = _make_tenant("beta", currency=cls.xaf, owner=cls.bob)
+        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
+        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
+
+        Account.objects.create(
+            tenant=cls.acme, code="500", name="ACME-ONLY-ACCOUNT", type="asset_cash",
+        )
+        Account.objects.create(
+            tenant=cls.beta, code="500", name="BETA-ONLY-ACCOUNT", type="asset_cash",
+        )
+
+    def test_admin_account_list_filters_to_alices_tenant(self):
+        self.client.force_login(self.alice)
+        r = self.client.get("/admin/accounting/account/")
+        body = r.content.decode("utf-8", errors="replace")
+        self.assertIn("ACME-ONLY-ACCOUNT", body)
+        self.assertNotIn("BETA-ONLY-ACCOUNT", body)
+
+    def test_admin_account_list_filters_to_bobs_tenant(self):
+        self.client.force_login(self.bob)
+        r = self.client.get("/admin/accounting/account/")
+        body = r.content.decode("utf-8", errors="replace")
+        self.assertIn("BETA-ONLY-ACCOUNT", body)
+        self.assertNotIn("ACME-ONLY-ACCOUNT", body)

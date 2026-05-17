@@ -19,6 +19,50 @@ from .models import (
 
 
 # ---------------------------------------------------------------------------
+# Tenant-aware admin mixin
+# ---------------------------------------------------------------------------
+
+
+class TenantAwareAdmin(admin.ModelAdmin):
+    """Mixin for ModelAdmins of tenant-scoped models.
+
+    - List view is filtered to ``request.tenant``.
+    - On add, ``obj.tenant`` is auto-set to ``request.tenant`` if not provided.
+    - FK selectors only show records belonging to ``request.tenant``
+      (so e.g. the account-picker on a JournalEntry line doesn't leak other
+      tenants' accounts).
+    """
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        tenant = getattr(request, "tenant", None)
+        if tenant is None:
+            # No tenant context (e.g. anon, or user with no memberships) →
+            # show nothing. Superuser without a tenant context falls here too
+            # — by design, they should switch tenant first.
+            return qs.none()
+        return qs.filter(tenant=tenant)
+
+    def save_model(self, request, obj, form, change):
+        if not change and not getattr(obj, "tenant_id", None):
+            tenant = getattr(request, "tenant", None)
+            if tenant is not None:
+                obj.tenant = tenant
+        super().save_model(request, obj, form, change)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        tenant = getattr(request, "tenant", None)
+        if tenant is not None:
+            related = db_field.related_model
+            # Filter FK selectors when the target model itself is tenant-scoped.
+            if related is not None and hasattr(related, "_meta") and any(
+                f.name == "tenant" for f in related._meta.fields
+            ):
+                kwargs["queryset"] = related.objects.filter(tenant=tenant)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+# ---------------------------------------------------------------------------
 # Tenancy
 # ---------------------------------------------------------------------------
 
@@ -77,7 +121,7 @@ class CompanyAdmin(admin.ModelAdmin):
 
 
 @admin.register(Partner)
-class PartnerAdmin(admin.ModelAdmin):
+class PartnerAdmin(TenantAwareAdmin):
     list_display = ('name', 'partner_type', 'tax_id', 'city', 'country', 'active')
     list_filter = ('partner_type', 'is_company', 'active', 'country')
     search_fields = ('name', 'tax_id', 'email', 'company_registry')
@@ -97,7 +141,7 @@ class PartnerAdmin(admin.ModelAdmin):
 
 
 @admin.register(Account)
-class AccountAdmin(admin.ModelAdmin):
+class AccountAdmin(TenantAwareAdmin):
     list_display = ('code', 'name', 'type', 'reconcile', 'deprecated')
     list_filter = ('type', 'reconcile', 'deprecated', 'currency')
     search_fields = ('code', 'name')
@@ -106,7 +150,7 @@ class AccountAdmin(admin.ModelAdmin):
 
 
 @admin.register(Journal)
-class JournalAdmin(admin.ModelAdmin):
+class JournalAdmin(TenantAwareAdmin):
     list_display = ('code', 'name', 'type', 'default_account', 'next_sequence', 'active')
     list_filter = ('type', 'active')
     search_fields = ('code', 'name')
@@ -126,7 +170,7 @@ class JournalEntryLineInline(admin.TabularInline):
 
 
 @admin.register(JournalEntry)
-class JournalEntryAdmin(admin.ModelAdmin):
+class JournalEntryAdmin(TenantAwareAdmin):
     list_display = (
         'name_or_draft', 'date', 'journal', 'partner', 'state',
         'total_debit', 'total_credit', 'is_balanced_display',
@@ -177,7 +221,7 @@ class JournalEntryAdmin(admin.ModelAdmin):
 
 
 @admin.register(JournalEntryLine)
-class JournalEntryLineAdmin(admin.ModelAdmin):
+class JournalEntryLineAdmin(TenantAwareAdmin):
     """The AR/AP sub-ledger lives here. Filter by `account → type → Receivable`
     (or Payable) plus a partner to see that partner's open items."""
 
@@ -214,7 +258,7 @@ class DepreciationLineInline(admin.TabularInline):
 
 
 @admin.register(FixedAsset)
-class FixedAssetAdmin(admin.ModelAdmin):
+class FixedAssetAdmin(TenantAwareAdmin):
     list_display = (
         'code', 'name', 'purchase_date', 'purchase_cost',
         'method', 'useful_life_months', 'book_value', 'state',
@@ -270,7 +314,7 @@ class FixedAssetAdmin(admin.ModelAdmin):
 
 
 @admin.register(DepreciationLine)
-class DepreciationLineAdmin(admin.ModelAdmin):
+class DepreciationLineAdmin(TenantAwareAdmin):
     list_display = ('asset', 'period_date', 'amount', 'posted', 'journal_entry')
     list_filter = ('posted', 'period_date')
     search_fields = ('asset__code', 'asset__name')

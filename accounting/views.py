@@ -1,5 +1,7 @@
 """Views for the accounting app — both the workspace launcher and the
-in-module pages (dashboard, reports). All views are login-required."""
+in-module pages (dashboard, reports). All in-module views go through
+``@tenant_required`` so they always see a real ``request.tenant`` and use
+``Model.objects.for_tenant(request.tenant)`` to scope every query."""
 
 from datetime import date, timedelta
 from decimal import Decimal
@@ -8,6 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Sum, Q, F
 from django.shortcuts import render
 
+from .middleware import tenant_required
 from .models import (
     Account,
     DepreciationLine,
@@ -153,10 +156,13 @@ MODULES = [
 
 @login_required
 def workspace(request):
+    """Module launcher — visible to any authenticated user; doesn't need
+    a tenant (a user with no memberships still sees the page)."""
+    tenant_name = request.tenant.name if request.tenant else "EA Ledgers"
     return render(
         request,
         "accounting/workspace.html",
-        {"modules": MODULES, "tenant_name": "Elite Advisors SARL"},
+        {"modules": MODULES, "tenant_name": tenant_name},
     )
 
 
@@ -164,12 +170,12 @@ def workspace(request):
 # Accounting Dashboard
 # ---------------------------------------------------------------------------
 
-def _journal_balance(journal):
-    """Return the net balance of all posted lines on this journal's default
-    account. For bank/cash journals this is effectively the bank balance."""
+def _journal_balance(tenant, journal):
+    """Net balance of all posted lines on this journal's default account.
+    For bank/cash journals this is effectively the bank balance."""
     if not journal.default_account_id:
         return Decimal("0")
-    agg = JournalEntryLine.objects.filter(
+    agg = JournalEntryLine.objects.for_tenant(tenant).filter(
         account_id=journal.default_account_id,
         entry__state="posted",
     ).aggregate(d=Sum("debit"), c=Sum("credit"))
@@ -177,28 +183,29 @@ def _journal_balance(journal):
 
 
 @login_required
+@tenant_required
 def dashboard(request):
+    t = request.tenant
     bank_cash_journals = list(
-        Journal.objects.filter(type__in=["bank", "cash"], active=True).order_by("code")
+        Journal.objects.for_tenant(t).filter(type__in=["bank", "cash"], active=True).order_by("code")
     )
     for j in bank_cash_journals:
-        j.balance = _journal_balance(j)
-        j.tx_count = JournalEntryLine.objects.filter(
-            entry__journal=j, entry__state="posted"
+        j.balance = _journal_balance(t, j)
+        j.tx_count = JournalEntryLine.objects.for_tenant(t).filter(
+            entry__journal=j, entry__state="posted",
         ).count()
 
-    # Quick counters
     counters = {
-        "draft_entries": JournalEntry.objects.filter(state="draft").count(),
-        "posted_entries": JournalEntry.objects.filter(state="posted").count(),
-        "customers": Partner.objects.filter(
-            Q(partner_type="customer") | Q(partner_type="both")
+        "draft_entries": JournalEntry.objects.for_tenant(t).filter(state="draft").count(),
+        "posted_entries": JournalEntry.objects.for_tenant(t).filter(state="posted").count(),
+        "customers": Partner.objects.for_tenant(t).filter(
+            Q(partner_type="customer") | Q(partner_type="both"),
         ).count(),
-        "suppliers": Partner.objects.filter(
-            Q(partner_type="vendor") | Q(partner_type="both")
+        "suppliers": Partner.objects.for_tenant(t).filter(
+            Q(partner_type="vendor") | Q(partner_type="both"),
         ).count(),
-        "accounts_count": Account.objects.filter(deprecated=False).count(),
-        "fixed_assets": FixedAsset.objects.exclude(state="disposed").count(),
+        "accounts_count": Account.objects.for_tenant(t).filter(deprecated=False).count(),
+        "fixed_assets": FixedAsset.objects.for_tenant(t).exclude(state="disposed").count(),
     }
 
     return render(
@@ -207,7 +214,7 @@ def dashboard(request):
         {
             "bank_cash_journals": bank_cash_journals,
             "counters": counters,
-            "tenant_name": "Elite Advisors SARL",
+            "tenant_name": t.name,
         },
     )
 
@@ -217,12 +224,14 @@ def dashboard(request):
 # ---------------------------------------------------------------------------
 
 @login_required
+@tenant_required
 def trial_balance(request):
+    t = request.tenant
     accounts = (
-        Account.objects.filter(deprecated=False)
+        Account.objects.for_tenant(t).filter(deprecated=False)
         .annotate(
-            debit_sum=Sum("lines__debit", filter=Q(lines__entry__state="posted")),
-            credit_sum=Sum("lines__credit", filter=Q(lines__entry__state="posted")),
+            debit_sum=Sum("lines__debit", filter=Q(lines__entry__state="posted") & Q(lines__tenant=t)),
+            credit_sum=Sum("lines__credit", filter=Q(lines__entry__state="posted") & Q(lines__tenant=t)),
         )
         .order_by("code")
     )
@@ -254,22 +263,24 @@ def trial_balance(request):
             "total_debit": total_d,
             "total_credit": total_c,
             "balanced": total_d == total_c,
-            "tenant_name": "Elite Advisors SARL",
+            "tenant_name": t.name,
         },
     )
 
 
 @login_required
+@tenant_required
 def general_ledger(request):
+    t = request.tenant
     qs = (
-        JournalEntryLine.objects.filter(entry__state="posted")
+        JournalEntryLine.objects.for_tenant(t).filter(entry__state="posted")
         .select_related("entry", "entry__journal", "account", "partner")
         .order_by("-entry__date", "-entry__id", "id")[:500]
     )
     return render(
         request,
         "accounting/general_ledger.html",
-        {"lines": qs, "tenant_name": "Elite Advisors SARL"},
+        {"lines": qs, "tenant_name": t.name},
     )
 
 
@@ -306,8 +317,10 @@ def _aging_buckets(qs, today=None):
 
 
 @login_required
+@tenant_required
 def customer_aging(request):
-    qs = JournalEntryLine.objects.filter(
+    t = request.tenant
+    qs = JournalEntryLine.objects.for_tenant(t).filter(
         entry__state="posted",
         account__type="receivable",
         reconciled=False,
@@ -321,14 +334,16 @@ def customer_aging(request):
             "rows": rows,
             "totals": totals,
             "partner_kind": "Customer",
-            "tenant_name": "Elite Advisors SARL",
+            "tenant_name": t.name,
         },
     )
 
 
 @login_required
+@tenant_required
 def supplier_aging(request):
-    qs = JournalEntryLine.objects.filter(
+    t = request.tenant
+    qs = JournalEntryLine.objects.for_tenant(t).filter(
         entry__state="posted",
         account__type="payable",
         reconciled=False,
@@ -348,14 +363,16 @@ def supplier_aging(request):
             "rows": rows,
             "totals": totals,
             "partner_kind": "Supplier",
-            "tenant_name": "Elite Advisors SARL",
+            "tenant_name": t.name,
         },
     )
 
 
 @login_required
+@tenant_required
 def fixed_assets_register(request):
-    assets = list(FixedAsset.objects.all().order_by("code"))
+    t = request.tenant
+    assets = list(FixedAsset.objects.for_tenant(t).order_by("code"))
     for a in assets:
         a.computed_total_posted = a.total_posted
         a.computed_book_value = a.book_value
@@ -367,5 +384,5 @@ def fixed_assets_register(request):
     return render(
         request,
         "accounting/fixed_assets_register.html",
-        {"assets": assets, "totals": totals, "tenant_name": "Elite Advisors SARL"},
+        {"assets": assets, "totals": totals, "tenant_name": t.name},
     )

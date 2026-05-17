@@ -3,14 +3,100 @@
 Scope: chart of accounts, partners, journals, double-entry journal entries
 (with debits=credits validation), AR/AP sub-ledger, and fixed-asset
 depreciation. Modeled loosely on Odoo's account.* hierarchy but trimmed.
+
+Multi-tenancy (Phase 0.1): every business model gets a `tenant` FK to the
+new `Tenant` model. The FK is nullable in this migration; a follow-up will
+tighten it to NOT NULL once the middleware and managers are in place.
 """
 
 from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
+
+
+# ---------------------------------------------------------------------------
+# Tenancy
+# ---------------------------------------------------------------------------
+
+
+class Tenant(models.Model):
+    """A customer organisation on the SaaS. One Tenant == one set of books.
+
+    A user can belong to many tenants via `Membership` (e.g. an accountant
+    serving multiple SMEs). The tenant's slug becomes its subdomain
+    (e.g. `elite.ealedgers.com`) once we wire that up.
+    """
+
+    BUSINESS_TYPES = [
+        ("services", "Services"),
+        ("goods", "Goods"),
+        ("both", "Services & Goods"),
+    ]
+    PLANS = [
+        ("free", "Free"),
+        ("starter", "Starter"),
+        ("pro", "Pro"),
+        ("enterprise", "Enterprise"),
+    ]
+
+    slug = models.SlugField(max_length=64, unique=True, help_text="URL-safe identifier; becomes subdomain")
+    name = models.CharField(max_length=128)
+    legal_name = models.CharField(max_length=256, blank=True)
+    country = models.CharField(max_length=64, blank=True, help_text="e.g. Cameroon")
+    currency = models.ForeignKey(
+        "Currency", on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+        help_text="Default reporting currency (e.g. XAF for OHADA)",
+    )
+    business_type = models.CharField(max_length=16, choices=BUSINESS_TYPES, default="both")
+    fiscal_year_start_month = models.IntegerField(default=1, help_text="1=January")
+    tax_id = models.CharField(max_length=32, blank=True, verbose_name="Tax ID / NIU")
+    company_registry = models.CharField(max_length=64, blank=True, verbose_name="RCCM")
+    plan = models.CharField(max_length=16, choices=PLANS, default="free")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="owned_tenants",
+        help_text="The user who created the tenant and pays the bill",
+    )
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Membership(models.Model):
+    """Joins a user to a tenant with a role. A user can have memberships in
+    multiple tenants (e.g. an accountant serving several SMEs)."""
+
+    ROLES = [
+        ("owner", "Owner"),
+        ("admin", "Admin"),
+        ("accountant", "Accountant"),
+        ("viewer", "Viewer"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships"
+    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=16, choices=ROLES, default="accountant")
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "tenant")]
+        ordering = ["tenant", "user"]
+
+    def __str__(self):
+        return f"{self.user} @ {self.tenant} ({self.get_role_display()})"
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +148,9 @@ class Partner(models.Model):
         ('other', 'Other'),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='partners',
+    )
     name = models.CharField(max_length=256)
     partner_type = models.CharField(max_length=16, choices=PARTNER_TYPES, default='customer')
     is_company = models.BooleanField(default=True)
@@ -140,6 +229,9 @@ class Account(models.Model):
         ('off_balance_sheet', 'Off-Balance Sheet'),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='accounts',
+    )
     code = models.CharField(max_length=16, unique=True)
     name = models.CharField(max_length=256)
     type = models.CharField(max_length=32, choices=TYPES)
@@ -171,6 +263,9 @@ class Journal(models.Model):
         ('general', 'General / Miscellaneous'),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journals',
+    )
     name = models.CharField(max_length=128)
     code = models.CharField(max_length=8, unique=True, help_text='Short code, e.g. VEN, ACH, BNK, OD')
     type = models.CharField(max_length=16, choices=TYPES)
@@ -213,6 +308,9 @@ class JournalEntry(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journal_entries',
+    )
     name = models.CharField(max_length=64, blank=True, help_text='Auto-assigned on posting from the journal sequence')
     journal = models.ForeignKey(Journal, on_delete=models.PROTECT, related_name='entries')
     date = models.DateField()
@@ -282,6 +380,9 @@ class JournalEntry(models.Model):
 class JournalEntryLine(models.Model):
     """A single debit or credit line. Maps to Odoo's account.move.line."""
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journal_entry_lines',
+    )
     entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE, related_name='lines')
     account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name='lines')
     partner = models.ForeignKey(
@@ -337,6 +438,9 @@ class FixedAsset(models.Model):
         ('disposed', 'Disposed'),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='fixed_assets',
+    )
     code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=256)
     purchase_date = models.DateField()
@@ -468,6 +572,9 @@ class FixedAsset(models.Model):
 class DepreciationLine(models.Model):
     """A single period's planned depreciation. Becomes posted=True once its journal entry exists."""
 
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='depreciation_lines_for_tenant',
+    )
     asset = models.ForeignKey(FixedAsset, on_delete=models.CASCADE, related_name='depreciation_lines')
     period_date = models.DateField(help_text='End of the period being depreciated')
     amount = models.DecimalField(max_digits=18, decimal_places=2)

@@ -8,9 +8,10 @@ import csv
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from accounting.models import Account, Company, Currency, Journal
+from accounting.models import Account, Company, Currency, Journal, Membership, Tenant
 
 
 # Maps the CSV's human-readable "Type" column (Odoo's account_type label)
@@ -53,10 +54,38 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self._seed_currencies()
+        self.tenant = self._seed_tenant()
         self._seed_company()
         self._seed_journals()
         self._load_chart(options['chart'])
         self.stdout.write(self.style.SUCCESS('All seed data loaded.'))
+
+    def _seed_tenant(self):
+        """Ensure the Elite Advisors tenant exists. Idempotent with the
+        0003_backfill_elite_advisors_tenant data migration."""
+        xaf = Currency.objects.filter(code='XAF').first()
+        admin_user = get_user_model().objects.filter(username='admin').first()
+        tenant, created = Tenant.objects.get_or_create(
+            slug='elite-advisors',
+            defaults={
+                'name': 'Elite Advisors SARL',
+                'legal_name': 'Elite Advisors SARL',
+                'country': 'Cameroon',
+                'currency': xaf,
+                'business_type': 'services',
+                'fiscal_year_start_month': 1,
+                'plan': 'free',
+                'owner': admin_user,
+                'active': True,
+            },
+        )
+        if admin_user is not None:
+            Membership.objects.get_or_create(
+                user=admin_user, tenant=tenant,
+                defaults={'role': 'owner', 'active': True},
+            )
+        self.stdout.write(f'Tenant: {tenant.name} ({"created" if created else "exists"}).')
+        return tenant
 
     # ----- seed helpers -----------------------------------------------------
 
@@ -104,6 +133,7 @@ class Command(BaseCommand):
                 defaults={
                     'name': name, 'type': jtype,
                     'sequence_prefix': prefix, 'active': True,
+                    'tenant': self.tenant,
                 },
             )
         self.stdout.write(f'Journals: {len(seeds)} default journals seeded.')
@@ -154,7 +184,10 @@ class Command(BaseCommand):
             reconcile = reconcile_str in ('VRAI', 'TRUE', '1', 'YES')
             _, was_created = Account.objects.update_or_create(
                 code=code,
-                defaults={'name': name, 'type': acct_type, 'reconcile': reconcile},
+                defaults={
+                    'name': name, 'type': acct_type, 'reconcile': reconcile,
+                    'tenant': self.tenant,
+                },
             )
             if was_created:
                 created += 1

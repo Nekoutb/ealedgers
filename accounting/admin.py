@@ -12,8 +12,49 @@ from .models import (
     Journal,
     JournalEntry,
     JournalEntryLine,
+    Membership,
     Partner,
+    Tenant,
 )
+
+
+# ---------------------------------------------------------------------------
+# Tenancy
+# ---------------------------------------------------------------------------
+
+
+class MembershipInline(admin.TabularInline):
+    model = Membership
+    extra = 0
+    autocomplete_fields = ("user",)
+    fields = ("user", "role", "active", "created_at")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(Tenant)
+class TenantAdmin(admin.ModelAdmin):
+    list_display = ("slug", "name", "country", "business_type", "currency", "plan", "owner", "active")
+    list_filter = ("business_type", "plan", "active", "country")
+    search_fields = ("slug", "name", "legal_name", "tax_id", "company_registry")
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("owner", "currency")
+    inlines = [MembershipInline]
+    fieldsets = (
+        (None, {"fields": ("slug", "name", "legal_name", "business_type", "plan", "active")}),
+        ("Locale & accounting", {"fields": ("country", "currency", "fiscal_year_start_month")}),
+        ("Identification", {"fields": ("tax_id", "company_registry")}),
+        ("Ownership", {"fields": ("owner",)}),
+        ("Audit", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+
+@admin.register(Membership)
+class MembershipAdmin(admin.ModelAdmin):
+    list_display = ("user", "tenant", "role", "active", "created_at")
+    list_filter = ("role", "active", "tenant")
+    search_fields = ("user__username", "user__email", "tenant__slug", "tenant__name")
+    autocomplete_fields = ("user", "tenant")
+    readonly_fields = ("created_at",)
 
 
 # ---------------------------------------------------------------------------

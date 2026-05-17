@@ -17,6 +17,8 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
+from accounting.managers import TenantManager
+
 
 # ---------------------------------------------------------------------------
 # Tenancy
@@ -139,7 +141,10 @@ class Company(models.Model):
 
 
 class Partner(models.Model):
-    """A customer, vendor, or both. Drives the AR/AP sub-ledgers."""
+    """A customer, vendor, or both. Drives the AR/AP sub-ledgers.
+
+    Tenant-scoped: each tenant has its own list of partners.
+    """
 
     PARTNER_TYPES = [
         ('customer', 'Customer'),
@@ -149,7 +154,7 @@ class Partner(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='partners',
+        Tenant, on_delete=models.CASCADE, related_name='partners',
     )
     name = models.CharField(max_length=256)
     partner_type = models.CharField(max_length=16, choices=PARTNER_TYPES, default='customer')
@@ -186,6 +191,8 @@ class Partner(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = TenantManager()
+
     class Meta:
         ordering = ['name']
 
@@ -199,7 +206,10 @@ class Partner(models.Model):
 
 
 class Account(models.Model):
-    """A single account in the chart. Maps to Odoo's account.account / SYSCOHADA account."""
+    """A single account in the chart. Maps to Odoo's account.account / SYSCOHADA account.
+
+    ``code`` is unique **per tenant** (enforced by ``unique_account_code_per_tenant``).
+    """
 
     TYPES = [
         # Assets
@@ -230,9 +240,9 @@ class Account(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='accounts',
+        Tenant, on_delete=models.CASCADE, related_name='accounts',
     )
-    code = models.CharField(max_length=16, unique=True)
+    code = models.CharField(max_length=16)
     name = models.CharField(max_length=256)
     type = models.CharField(max_length=32, choices=TYPES)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
@@ -244,6 +254,9 @@ class Account(models.Model):
 
     class Meta:
         ordering = ['code']
+        constraints = [
+            models.UniqueConstraint(fields=['tenant', 'code'], name='unique_account_code_per_tenant'),
+        ]
 
     def __str__(self):
         return f'{self.code} — {self.name}'
@@ -252,6 +265,9 @@ class Account(models.Model):
     def syscohada_class(self):
         """First digit of the account code = SYSCOHADA class (1..9)."""
         return self.code[0] if self.code else ''
+
+    # Tenant-aware manager (Account.objects.for_tenant(tenant))
+    objects = TenantManager()
 
 
 class Journal(models.Model):
@@ -264,10 +280,10 @@ class Journal(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journals',
+        Tenant, on_delete=models.CASCADE, related_name='journals',
     )
     name = models.CharField(max_length=128)
-    code = models.CharField(max_length=8, unique=True, help_text='Short code, e.g. VEN, ACH, BNK, OD')
+    code = models.CharField(max_length=8, help_text='Short code, e.g. VEN, ACH, BNK, OD')
     type = models.CharField(max_length=16, choices=TYPES)
     default_account = models.ForeignKey(
         Account, on_delete=models.PROTECT, null=True, blank=True, related_name='+',
@@ -280,6 +296,11 @@ class Journal(models.Model):
 
     class Meta:
         ordering = ['code']
+        constraints = [
+            models.UniqueConstraint(fields=['tenant', 'code'], name='unique_journal_code_per_tenant'),
+        ]
+
+    objects = TenantManager()
 
     def __str__(self):
         return f'{self.code} — {self.name}'
@@ -300,7 +321,10 @@ class Journal(models.Model):
 
 
 class JournalEntry(models.Model):
-    """A balanced set of debits/credits. Maps to Odoo's account.move."""
+    """A balanced set of debits/credits. Maps to Odoo's account.move.
+
+    Tenant-scoped.
+    """
 
     STATES = [
         ('draft', 'Draft'),
@@ -309,7 +333,7 @@ class JournalEntry(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journal_entries',
+        Tenant, on_delete=models.CASCADE, related_name='journal_entries',
     )
     name = models.CharField(max_length=64, blank=True, help_text='Auto-assigned on posting from the journal sequence')
     journal = models.ForeignKey(Journal, on_delete=models.PROTECT, related_name='entries')
@@ -324,6 +348,8 @@ class JournalEntry(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     posted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
 
     class Meta:
         ordering = ['-date', '-id']
@@ -378,10 +404,14 @@ class JournalEntry(models.Model):
 
 
 class JournalEntryLine(models.Model):
-    """A single debit or credit line. Maps to Odoo's account.move.line."""
+    """A single debit or credit line. Maps to Odoo's account.move.line.
+
+    Tenant-scoped. The tenant must match the parent entry's tenant; that
+    invariant is enforced in ``clean()``.
+    """
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='journal_entry_lines',
+        Tenant, on_delete=models.CASCADE, related_name='journal_entry_lines',
     )
     entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE, related_name='lines')
     account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name='lines')
@@ -395,6 +425,8 @@ class JournalEntryLine(models.Model):
 
     reconciled = models.BooleanField(default=False)
     reconciled_with = models.ManyToManyField('self', blank=True, symmetrical=True)
+
+    objects = TenantManager()
 
     class Meta:
         ordering = ['entry', 'id']
@@ -413,6 +445,9 @@ class JournalEntryLine(models.Model):
             raise ValidationError(
                 f'Account {self.account.code} ({self.account.get_type_display()}) requires a partner.'
             )
+        # Tenant must match the parent entry's tenant (defence in depth)
+        if self.entry_id and self.tenant_id and self.entry.tenant_id != self.tenant_id:
+            raise ValidationError("Line tenant must match the parent entry's tenant.")
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -425,7 +460,10 @@ class JournalEntryLine(models.Model):
 
 
 class FixedAsset(models.Model):
-    """A depreciable asset. Generates a per-period schedule and can auto-post entries."""
+    """A depreciable asset. Generates a per-period schedule and can auto-post entries.
+
+    ``code`` is unique per tenant.
+    """
 
     METHODS = [
         ('straight_line', 'Straight-line'),
@@ -439,9 +477,9 @@ class FixedAsset(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='fixed_assets',
+        Tenant, on_delete=models.CASCADE, related_name='fixed_assets',
     )
-    code = models.CharField(max_length=32, unique=True)
+    code = models.CharField(max_length=32)
     name = models.CharField(max_length=256)
     purchase_date = models.DateField()
     in_service_date = models.DateField(help_text='Depreciation starts on this date')
@@ -475,8 +513,13 @@ class FixedAsset(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = TenantManager()
+
     class Meta:
         ordering = ['code']
+        constraints = [
+            models.UniqueConstraint(fields=['tenant', 'code'], name='unique_fixedasset_code_per_tenant'),
+        ]
 
     def __str__(self):
         return f'{self.code} — {self.name}'
@@ -570,10 +613,13 @@ class FixedAsset(models.Model):
 
 
 class DepreciationLine(models.Model):
-    """A single period's planned depreciation. Becomes posted=True once its journal entry exists."""
+    """A single period's planned depreciation. Becomes posted=True once its journal entry exists.
+
+    Tenant-scoped.
+    """
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, null=True, blank=True, related_name='depreciation_lines_for_tenant',
+        Tenant, on_delete=models.CASCADE, related_name='depreciation_lines_for_tenant',
     )
     asset = models.ForeignKey(FixedAsset, on_delete=models.CASCADE, related_name='depreciation_lines')
     period_date = models.DateField(help_text='End of the period being depreciated')
@@ -582,6 +628,8 @@ class DepreciationLine(models.Model):
     journal_entry = models.ForeignKey(
         JournalEntry, on_delete=models.PROTECT, null=True, blank=True, related_name='depreciation_lines'
     )
+
+    objects = TenantManager()
 
     class Meta:
         ordering = ['asset', 'period_date']

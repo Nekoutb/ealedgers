@@ -20,22 +20,53 @@ Subdomain-based resolution (``acme.ealedgers.com``) will be added later
 when we wire DNS wildcards; the contract here stays the same.
 """
 
+from django.db import connection
 from django.shortcuts import redirect
 from django.urls import reverse
 
 
 SESSION_TENANT_KEY = "tenant_slug"
 
+# Name of the PostgreSQL session-local variable read by the RLS policies in
+# accounting/migrations/0008_postgres_rls.py. The 'app.' prefix is the
+# standard convention for app-defined session settings — Postgres requires
+# a dot-separated namespace. No-op on SQLite (no RLS support).
+PG_TENANT_SETTING = "app.current_tenant_id"
+
+
+def _set_pg_tenant_setting(tenant_id):
+    """When running against Postgres, pin the current tenant id as a
+    session-local variable so the RLS policies can filter rows. No-op on
+    SQLite (doesn't support RLS or SET LOCAL).
+
+    Called once per request after ``request.tenant`` has been resolved.
+    A value of 0 means "no tenant" — the RLS policy compares as an
+    integer and real tenants always have positive ids, so 0 matches
+    nothing (fail-closed behaviour)."""
+    if connection.vendor != "postgresql":
+        return
+    value = str(tenant_id) if tenant_id else "0"
+    with connection.cursor() as cur:
+        # set_config(name, value, is_local=true) is the SQL-injection-safe
+        # equivalent of "SET LOCAL <name> = <value>". is_local=true scopes
+        # the setting to the current transaction.
+        cur.execute("SELECT set_config(%s, %s, true)", [PG_TENANT_SETTING, value])
+
 
 class TenantContextMiddleware:
     """Sets ``request.tenant`` on every request based on the active user's
-    membership. Anonymous requests get ``request.tenant = None``."""
+    membership. Anonymous requests get ``request.tenant = None``.
+
+    On Postgres, additionally pins ``app.current_tenant_id`` so the RLS
+    policies installed by migration 0008 enforce tenant isolation at the
+    database layer as a backstop for the ORM-level filtering."""
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         request.tenant = self._resolve_tenant(request)
+        _set_pg_tenant_setting(request.tenant.id if request.tenant else None)
         return self.get_response(request)
 
     # ----- resolution ------------------------------------------------------

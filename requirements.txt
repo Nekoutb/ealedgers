@@ -2,3 +2,7 @@ Django>=5.1,<5.2
 Pillow>=10.0
 python-dateutil>=2.8
 gunicorn>=22.0
+# PostgreSQL driver (Step 2 / Phase 0.3). On Windows dev hosts without libpq,
+# the binary wheel ships its own libpq. Optional: if DATABASE_URL is not set,
+# the app continues to run on SQLite (unchanged dev behaviour).
+psycopg[binary]>=3.1

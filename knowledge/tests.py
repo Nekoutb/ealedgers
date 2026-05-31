@@ -573,16 +573,91 @@ class K10LoaderTests(TestCase):
             self.assertEqual(hit["framework"], "CGI-2025")
 
 
+# ---------------------------------------------------------------------------
+# Step 20 — K12 CGI 2025 withholding-tax (retenues à la source) slice
+# (TSR — the non-resident-services withholding — is deferred with K11/TVA:
+#  its provisions sit at art. 225+, past the supplied PDF's art.-124 cutoff.)
+# ---------------------------------------------------------------------------
+
+
+class K12LoaderTests(TestCase):
+    """K12 loads via migration 0006 and is retrievable. Second tax_code
+    slice (CGI-2025), focused on withholding at source."""
+
+    def test_k12_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K12",
+                                framework="CGI-2025").count()
+        self.assertEqual(n, 17)
+
+    def test_all_k12_are_tax_code_scope(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K12")
+            .exclude(scope="tax_code").exists()
+        )
+
+    def test_key_wht_rules_encoded(self):
+        for slug in ("cgi-2025-wht-ircm-rate",
+                     "cgi-2025-wht-ircm-withholding",
+                     "cgi-2025-wht-bvmac-securities-reduced",
+                     "cgi-2025-wht-property-income",
+                     "cgi-2025-wht-digital-platform",
+                     "cgi-2025-wht-non-salaried-agents",
+                     "cgi-2025-wht-irpp-salary-scale"):
+            self.assertTrue(Rule.objects.filter(slug=slug).exists(),
+                            f"{slug} missing")
+
+    def test_ircm_rate_effects(self):
+        r = Rule.objects.get(slug="cgi-2025-wht-ircm-rate")
+        self.assertEqual(r.effects["taux_liberatoire_standard_pct"], 15)
+        self.assertEqual(r.effects["taux_dividendes_pme_pct"], 10)
+        self.assertEqual(r.effects["taux_paradis_fiscal_pct"], 30)
+        self.assertEqual(r.effects["seuil_ca_dividendes_pme_fcfa"], 3000000000)
+
+    def test_property_income_withholding_rate(self):
+        r = Rule.objects.get(slug="cgi-2025-wht-property-income")
+        self.assertEqual(r.effects["taux_pct"], 15)
+        self.assertEqual(r.effects["reversement"], "15_du_mois_suivant")
+
+    def test_bvmac_reduced_rates(self):
+        r = Rule.objects.get(slug="cgi-2025-wht-bvmac-securities-reduced")
+        self.assertEqual(
+            r.effects["taux_dividendes_et_obligations_court_terme_pct"], 10)
+        self.assertEqual(r.effects["taux_obligations_5ans_et_plus_pct"], 5)
+
+    def test_salary_scale_brackets(self):
+        r = Rule.objects.get(slug="cgi-2025-wht-irpp-salary-scale")
+        scale = r.effects["bareme_annuel_fcfa"]
+        self.assertEqual(scale[0]["taux_pct"], 10)
+        self.assertEqual(scale[-1]["taux_pct"], 35)
+
+    def test_all_k12_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K12")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_retrieval_ircm_withholding(self):
+        res = retrieve("retenue a la source revenus capitaux mobiliers dividendes",
+                       framework="CGI-2025", k=1)
+        self.assertEqual(res[0]["slug"], "cgi-2025-wht-ircm-withholding")
+
+    def test_retrieval_property_withholding(self):
+        res = retrieve("retenue source 15 pourcent loyers revenus fonciers",
+                       framework="CGI-2025", k=1)
+        self.assertEqual(res[0]["slug"], "cgi-2025-wht-property-income")
+
+
 class CGITotalsTests(TestCase):
-    """Cross-slice sanity for the CGI tax catalogue (K10 first; K11/K12 next)."""
+    """Cross-slice sanity for the CGI tax catalogue (K10 + K12; K11/TVA next)."""
 
     def test_total_cgi_rules(self):
+        # 30 (K10 / IS) + 17 (K12 / WHT) = 47
         self.assertEqual(
-            Rule.objects.filter(framework="CGI-2025").count(), 30)
+            Rule.objects.filter(framework="CGI-2025").count(), 47)
 
     def test_cgi_slices_present(self):
         slices = set(
             Rule.objects.filter(framework="CGI-2025")
             .values_list("knowledge_slice", flat=True)
         )
-        self.assertEqual(slices, {"K10"})
+        self.assertEqual(slices, {"K10", "K12"})

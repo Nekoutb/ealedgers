@@ -11,6 +11,7 @@ from django.contrib import admin
 from accounting.admin import TenantAwareAdmin
 
 from .models import Citation, Rule, TenantProcedure
+from .validation import validate_and_apply
 
 
 class CitationInline(admin.TabularInline):
@@ -68,8 +69,8 @@ class TenantProcedureAdmin(TenantAwareAdmin):
         ("Rule logic", {"fields": ("trigger_conditions", "effects",
                                    "overrides_rule")}),
         ("Validation", {"fields": ("validation_status", "validation_notes"),
-                        "description": "Set by the framework-conflict "
-                                       "validator (Step 25)."}),
+                        "description": "Set automatically by the "
+                                       "framework-conflict validator on save."}),
         ("Audit", {"classes": ("collapse",),
                    "fields": ("created_by", "created_at", "updated_at")}),
     )
@@ -78,3 +79,5 @@ class TenantProcedureAdmin(TenantAwareAdmin):
         if not change and not obj.created_by_id:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+        # Re-run the framework-conflict validator on every save.
+        validate_and_apply(obj)

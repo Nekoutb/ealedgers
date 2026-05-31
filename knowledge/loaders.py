@@ -25,6 +25,7 @@ SLICE_FIXTURES = {
     "K15": "k15_syscohada_evaluation.json",
     "K20": "k20_syscohada_first_application.json",
     "K10": "k10_cgi_is.json",
+    "K12": "k12_cgi_wht.json",
 }
 
 

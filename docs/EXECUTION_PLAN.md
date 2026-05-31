@@ -145,7 +145,7 @@ unlock the next step.
 | 17  | P02       | Encode K20 — SYSCOHADA Titre VIII Ch. 41 (Première application)                                       | Rule explorer shows onboarding helpers                                   |
 | 18  | P02       | Encode K10 — CGI 2025 Titre I Ch. I (IS, art. 2–23) **[swapped with 19 — see note]**                  | Browse IS rules with article citations                                   |
 | 19  | P02       | Encode K11 — CGI 2025 Titre II (TVA) **[BLOCKED — source PDF ends at art. 124, lacks art. 125–149]**  | Browse TVA rules with article citations                                  |
-| 20  | P02       | Encode K12 — CGI 2025 WHT                                                                             | Browse WHT rules                                                         |
+| 20  | P02       | Encode K12 — CGI 2025 WHT (retenues à la source) **[TSR sub-part deferred — see note]**               | Browse WHT rules with article citations                                  |
 |     |           | 🟢 **Progress digest #2** — scaffolding + core knowledge                                               |                                                                          |
 | 21  | P02       | Encode K02 — SYSCOHADA Titre VIII Ch. 4 (component approach)                                          | Browse FA component rules                                                |
 | 22  | P02       | Encode K04 — SYSCOHADA Titre VIII Ch. 12 (asset impairment)                                           | Browse impairment rules                                                  |
@@ -388,6 +388,7 @@ unlock the next step.
 | 2026-05-31 | 16   | Encoded K15 (SYSCOHADA evaluation & determination of result, Articles 35-51): 15 Rule rows — base conventions, acquisition/production cost, component approach, going concern, permanence, closing valuation, inventory FIFO/WAC, depreciation, impairment, provisions, FX-on-entry. Authored from Titre I Ch.4 (p.28-37, read directly). Migration 0003. needs_review pending Step-27. |
 | 2026-05-31 | 17   | Encoded K20 (Première application du SYSCOHADA révisé, Titre VIII Ch.41): 12 Rule rows — transition objective, retrospective change-of-method, opening balance sheet, compte 475 (4751/4752) mechanism, capital protection, conformity declaration, charges immobilisées, component-approach choice, leases prospective, investment-property renames, retirement commitments, pro-forma. Authored from p.951-959. Migration 0004. SYSCOHADA base now = 39 cited rules (K01+K15+K20). |
 | 2026-05-31 | 18/19 | **Steps 18 ↔ 19 swapped.** Planned Step 18 was K11 (TVA), but the supplied `CGI 2025 complet.pdf` ends at art. 124 and does not contain the TVA section (art. 125–149). Per the no-fabrication rule, K11 cannot be encoded from the authoritative source yet, so it is deferred (now Step 19, **BLOCKED** pending the TVA pages). K10 (IS) — fully present, art. 2–23 — was encoded as Step 18 instead. |
+| 2026-05-31 | 20   | Encoded **K12** (CGI 2025 — retenues à la source / WHT): **17 Rule rows** — IRCM rate 15 %/30 % (paradis fiscal)/10 % (dividendes PME ≤ 3 Md) + CAC (art. 70/71), IRCM base + withholding mechanics + 9-month deemed-distribution + foreign-source RCM (art. 35/85/86), **BVMAC reduced 10 %/5 %** (art. 111), salary WHT + IRPP scale 10/15/25/35 % (art. 69/71/81-83), **property-income WHT 15 %** / 10 % libératoire / 5 %-10 % on gains (art. 87-90), public-procurement & public-accountant retenue, 5 % acompte, **10 % digital-platform**, **10 % libératoire non-salaried agents**, BNC libératoire 10 %/5 %, public-expenditure collection, mandatory withholding certificate (art. 92/92 bis/92 ter/93 bis/116 ter/93 bis A; rates anchored in art. 69 (3)). Migration 0006. CGI catalogue now = 47 cited rules (K10 + K12). **TSR (non-resident-services WHT, art. 225+) deferred with K11/TVA** — both sit beyond the supplied PDF's art.-124 cutoff; not fabricated. Authored from CGI PDF p.35–63, read directly. |
 | 2026-05-31 | 18   | Encoded **K10** (CGI 2025 Titre I Ch. I — Impôt sur les sociétés, art. 2–23): **30 Rule rows** — scope/exemptions/territoriality, net-asset taxable-profit base, full deductibility regime (remuneration + expat-retirement 15% cap, head-office/technical-fee 2.5% cap, royalty 2.5% & commission 1% caps, taxes/fines, insurance/self-insurance, donations 0.5%/5% CA caps, thin-cap BEAC+2pts / 25%-threshold / 1.5× equity / 25% result), depreciation principles + rate schedule, provisions (2y/3y doubtful-debt), FX, cash-≥100k & tax-haven disallowances, capital gains on cessation, **4y/6y loss carry-forward**, parent-subsidiary (10% quote-part, 25%, CEMAC, 2y), **30%/25% rates**, transfer pricing (25%), **monthly acompte 2.2%/5.5%**, **minimum de perception 2.2%/5.5% of CA N-1**, annual-return deadlines. First `tax_code`-scope slice (framework `CGI-2025`, jurisdiction `CMR`). Fixture + loader + migration 0005. All `needs_review` pending Step-27. Authored from CGI PDF p.5–31, read directly. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
@@ -413,3 +414,19 @@ What the session does, in order:
 **Steps already done as code-only, no SSH needed:** 1, 2, 4, 6, 7, 8, 9,
 11, 12 (code/config). After the SSH bundle, Phase P01 is fully complete
 and we cross into P02 (knowledge backbone, Step 13).
+
+### CGI source-coverage gap (added 2026-05-31)
+
+The supplied `CGI 2025 complet.pdf` contains **articles 2–124 only** (Livre
+Premier through art. 124). Two encoding items need CGI pages **beyond** that
+cutoff and are **deferred, not fabricated**:
+
+| Item                                   | Needs CGI articles            | Blocks                          |
+| -------------------------------------- | ----------------------------- | ------------------------------- |
+| **K11 — TVA + droits d'accises**       | art. **125–149** (Titre II)   | all of Step 19 (fully blocked)  |
+| **TSR — non-resident-services WHT**    | art. **225+** (Titre III)     | one sub-part of K12 (rest done) |
+
+**To unblock:** provide a CGI 2025 PDF that includes those article ranges
+and I'll encode K11 and the TSR sub-part using the same fixture + loader +
+migration pattern, with exact citations. Everything else in the CGI
+catalogue (K10 IS, K12 WHT) is fully encoded from the pages on hand.

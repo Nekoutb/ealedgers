@@ -378,6 +378,9 @@ unlock the next step.
 | 2026-05-31 | 7+   | Interleaved fix (owner request): admin Site-administration model list rendered as a card grid (≈5×5 square) instead of a vertical list. |
 | 2026-05-31 | 8    | Tenant.accounting_framework + Tenant.agent_enabled added; TenantDepartmentSubscription model (per-tenant department staffing). Migration 0011 extends RLS. |
 | 2026-05-31 | 9    | Data migration 0012 backfills a Provenance(source='manual') row for every existing JournalEntry. Idempotent + reversible. Runs on next deploy. |
+| 2026-05-31 | 9    | Step 9 verified on prod as a no-op: production Elite Advisors has 0 journal entries (chart + journals seeded, no JEs posted), so 0 provenance created. Correct (provenance count = JE count = 0). |
+| 2026-05-31 | 11   | Scaffolded 4 empty Django apps (knowledge, agents, ingest, connectors) + registered in INSTALLED_APPS. Smoke tests only; models land in later phases. |
+| 2026-05-31 | 10   | Step 10 progress digest delivered. SSH bundle (Steps 3 + 5 + 10) scheduled-pending; code-only steps continue. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

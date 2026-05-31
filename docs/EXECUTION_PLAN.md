@@ -375,6 +375,7 @@ unlock the next step.
 | 2026-05-31 | 4    | ensure_admin command + post_migrate signal landed (R4 enforced).                                              |
 | 2026-05-31 | 6    | Period + PeriodLock + FxRate models landed. Migration 0009 also extends RLS to the two new tenant-scoped tables. |
 | 2026-05-31 | 7    | Provenance + AgentRun + AgentToolCall + ERPConnection + ERPOperation models landed. Migration 0010 also extends RLS. |
+| 2026-05-31 | 7+   | Interleaved fix (owner request): admin Site-administration model list rendered as a card grid (≈5×5 square) instead of a vertical list. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

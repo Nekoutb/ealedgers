@@ -1,0 +1,192 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}{{ rule.title }} · Knowledge Base{% endblock %}
+
+{% block content %}
+<article class="kd" data-framework="{{ rule.framework }}">
+
+  <a class="kd-back" href="{% url 'knowledge:explorer' %}">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+    Rule Explorer
+  </a>
+
+  <header class="kd-head">
+    <div class="kd-badges">
+      <span class="kd-badge kd-badge--fw">{{ rule.framework }}</span>
+      {% if rule.knowledge_slice %}<span class="kd-chip">{{ rule.knowledge_slice }}</span>{% endif %}
+      <span class="kd-chip">{{ rule.get_scope_display }}</span>
+      {% if rule.jurisdiction %}<span class="kd-chip">{{ rule.jurisdiction }}</span>{% endif %}
+      {% if rule.review_status == "needs_review" %}
+        <span class="kd-badge kd-badge--warn" title="Awaiting expert sign-off (Step 27)">Needs expert review</span>
+      {% else %}
+        <span class="kd-badge kd-badge--ok">Verified by expert</span>
+      {% endif %}
+    </div>
+    <h1 class="kd-title">{{ rule.title }}</h1>
+    {% if rule.source_ref %}<div class="kd-ref">{{ rule.source_ref }}</div>{% endif %}
+  </header>
+
+  <!-- ===== Verbatim source ===== -->
+  {% if rule.source_text %}
+  <section class="kd-section">
+    <div class="kd-section-head">
+      <h2>Source text <span class="kd-verbatim">verbatim</span></h2>
+      <div class="kd-actions">
+        <button type="button" class="kd-btn" data-copy="citation">Copy citation</button>
+        <button type="button" class="kd-btn kd-btn--ghost" data-copy="reference">Copy reference</button>
+      </div>
+    </div>
+    <blockquote class="kd-quote">{{ rule.source_text }}</blockquote>
+  </section>
+  {% endif %}
+
+  <!-- ===== Structured DSL ===== -->
+  <section class="kd-section kd-grid">
+    <div>
+      <h3 class="kd-h3">Trigger conditions</h3>
+      <pre class="kd-json">{{ trigger_json }}</pre>
+    </div>
+    <div>
+      <h3 class="kd-h3">Effects</h3>
+      <pre class="kd-json">{{ effects_json }}</pre>
+    </div>
+  </section>
+
+  <!-- ===== Additional citations ===== -->
+  {% if citations %}
+  <section class="kd-section">
+    <h3 class="kd-h3">Additional citations</h3>
+    <ul class="kd-cites">
+      {% for c in citations %}
+        <li>
+          <div class="kd-cite-ref">{{ c.reference }}{% if c.page %} · p.{{ c.page }}{% endif %}</div>
+          {% if c.text %}<div class="kd-cite-text">{{ c.text }}</div>{% endif %}
+          {% if c.url %}<a class="kd-cite-url" href="{{ c.url }}" rel="noopener" target="_blank">Open source ↗</a>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <!-- ===== Meta ===== -->
+  <section class="kd-section">
+    <h3 class="kd-h3">Metadata</h3>
+    <dl class="kd-meta">
+      <div><dt>Slug</dt><dd class="kd-mono">{{ rule.slug }}</dd></div>
+      <div><dt>Confidence floor</dt><dd class="kd-mono">{{ rule.confidence_floor }}</dd></div>
+      <div><dt>Active</dt><dd>{{ rule.active|yesno:"Yes,No" }}</dd></div>
+      <div><dt>Effective from</dt><dd>{{ rule.effective_from|default:"—" }}</dd></div>
+      <div><dt>Effective to</dt><dd>{{ rule.effective_to|default:"—" }}</dd></div>
+      <div><dt>Last updated</dt><dd>{{ rule.updated_at|date:"Y-m-d H:i" }}</dd></div>
+    </dl>
+  </section>
+
+  <p class="kd-note">
+    This rule is product knowledge shared by all tenants. Tenant-specific
+    overrides live in tenant procedures and never weaken a framework rule.{% if user.is_staff %}
+    Edits to the rule itself happen in the
+    <a href="/admin/knowledge/rule/{{ rule.id }}/change/">admin</a>.{% endif %}
+  </p>
+
+  <!-- Hidden source for the copy buttons (kept out of visible text) -->
+  <span id="kd-citation-src" hidden>{{ citation_text }}</span>
+  <span id="kd-reference-src" hidden>{{ rule.source_ref }}</span>
+</article>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .kd { --kd-ink:#0a0a0a; --kd-muted:#737373; --kd-hair:#e5e5e5; --kd-brand:#0d9488;
+        --kd-brand-soft:#ccfbf1; --kd-warn:#b45309; --kd-warn-soft:#fef3c7;
+        --kd-ok:#047857; --kd-ok-soft:#d1fae5; --kd-accent:var(--kd-brand);
+        color:var(--kd-ink); max-width:780px; }
+  .kd[data-framework="CGI-2025"] { --kd-accent:#4f46e5; }
+
+  .kd-back { display:inline-flex; align-items:center; gap:.35rem; font-size:.85rem; font-weight:500;
+             color:var(--kd-muted); text-decoration:none; margin-bottom:1.3rem; }
+  .kd-back:hover { color:var(--kd-ink); }
+
+  .kd-head { padding-bottom:1.3rem; border-bottom:1px solid var(--kd-hair); }
+  .kd-badges { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.8rem; }
+  .kd-badge { font-size:.68rem; font-weight:600; letter-spacing:.03em; padding:.22rem .55rem; border-radius:999px; }
+  .kd-badge--fw { background:var(--kd-brand-soft); color:#0f766e; }
+  .kd[data-framework="CGI-2025"] .kd-badge--fw { background:#e0e7ff; color:#4338ca; }
+  .kd-badge--warn { background:var(--kd-warn-soft); color:var(--kd-warn); }
+  .kd-badge--ok { background:var(--kd-ok-soft); color:var(--kd-ok); }
+  .kd-chip { font-size:.68rem; font-weight:600; font-family:"Geist Mono", ui-monospace, monospace;
+             background:#f5f5f5; color:#525252; padding:.22rem .5rem; border-radius:6px; }
+  .kd-title { font-size:1.85rem; line-height:1.15; font-weight:650; letter-spacing:-.02em; margin:.2rem 0 .4rem; }
+  .kd-ref { font-family:"Geist Mono", ui-monospace, monospace; font-size:.82rem; color:var(--kd-accent); font-weight:500; }
+
+  .kd-section { margin-top:1.8rem; }
+  .kd-section-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:.7rem; }
+  .kd-section-head h2 { font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--kd-muted); font-weight:600; margin:0; }
+  .kd-verbatim { color:var(--kd-accent); margin-left:.3rem; }
+  .kd-h3 { font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--kd-muted); font-weight:600; margin:0 0 .6rem; }
+
+  .kd-actions { display:flex; gap:.5rem; }
+  .kd-btn { font-family:inherit; font-size:.8rem; font-weight:600; cursor:pointer; border-radius:9px;
+            padding:.45rem .8rem; border:1px solid transparent; background:var(--kd-ink); color:#fff;
+            transition:background .15s, transform .08s; }
+  .kd-btn:active { transform:translateY(1px); }
+  .kd-btn:hover { background:#262626; }
+  .kd-btn--ghost { background:#fff; border-color:var(--kd-hair); color:var(--kd-ink); }
+  .kd-btn--ghost:hover { background:#fafafa; border-color:#d4d4d4; }
+  .kd-btn.is-done { background:var(--kd-ok); }
+
+  .kd-quote { margin:0; padding:1.1rem 1.3rem; background:#fff; border:1px solid var(--kd-hair);
+              border-left:3px solid var(--kd-accent); border-radius:0 12px 12px 0; font-size:1rem;
+              line-height:1.65; color:#1f1f1f; }
+
+  .kd-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; }
+  .kd-json { margin:0; padding:1rem; background:#0a0a0a; color:#e5e5e5; border-radius:12px;
+             font-family:"Geist Mono", ui-monospace, monospace; font-size:.78rem; line-height:1.55;
+             overflow:auto; max-height:340px; white-space:pre; }
+
+  .kd-cites { list-style:none; padding:0; margin:0; display:grid; gap:.7rem; }
+  .kd-cites li { background:#fff; border:1px solid var(--kd-hair); border-radius:12px; padding:.8rem 1rem; }
+  .kd-cite-ref { font-family:"Geist Mono", ui-monospace, monospace; font-size:.8rem; color:var(--kd-accent); margin-bottom:.3rem; }
+  .kd-cite-text { font-size:.9rem; line-height:1.55; color:#3f3f3f; }
+  .kd-cite-url { font-size:.8rem; color:var(--kd-accent); }
+
+  .kd-meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:.8rem 1.2rem; margin:0;
+             background:#fff; border:1px solid var(--kd-hair); border-radius:12px; padding:1rem 1.2rem; }
+  .kd-meta dt { font-size:.66rem; letter-spacing:.06em; text-transform:uppercase; color:var(--kd-muted); margin-bottom:.15rem; }
+  .kd-meta dd { margin:0; font-size:.9rem; }
+  .kd-mono { font-family:"Geist Mono", ui-monospace, monospace; font-size:.82rem; }
+
+  .kd-note { margin-top:1.8rem; font-size:.82rem; line-height:1.6; color:var(--kd-muted);
+             border-top:1px solid var(--kd-hair); padding-top:1.1rem; }
+  .kd-note a { color:var(--kd-accent); text-decoration:underline; text-underline-offset:3px; }
+
+  @media (max-width:640px) {
+    .kd-title { font-size:1.45rem; }
+    .kd-grid { grid-template-columns:1fr; }
+  }
+</style>
+<script>
+  (function () {
+    document.querySelectorAll(".kd-btn[data-copy]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var which = btn.getAttribute("data-copy");
+        var src = document.getElementById("kd-" + which + "-src");
+        if (!src) return;
+        var text = src.textContent;
+        var done = function () {
+          var label = btn.textContent;
+          btn.textContent = "Copied ✓";
+          btn.classList.add("is-done");
+          setTimeout(function () { btn.textContent = label; btn.classList.remove("is-done"); }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () { done(); });
+        } else {
+          var ta = document.createElement("textarea");
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          try { document.execCommand("copy"); } catch (e) {}
+          document.body.removeChild(ta); done();
+        }
+      });
+    });
+  })();
+</script>
+{% endblock %}

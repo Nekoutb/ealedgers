@@ -5,6 +5,7 @@ from datetime import date
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 
 from accounting.models import Currency, Membership, Tenant
 from knowledge.models import Citation, Rule, TenantProcedure
@@ -778,3 +779,78 @@ class CGITotalsTests(TestCase):
             .values_list("knowledge_slice", flat=True)
         )
         self.assertEqual(slices, {"K10", "K12"})
+
+
+# ---------------------------------------------------------------------------
+# Step 23 — rule-explorer UI
+# ---------------------------------------------------------------------------
+
+
+class RuleExplorerViewTests(TestCase):
+    """The browse/search explorer and the rule-detail page. The rule base is
+    the migration-loaded catalogue (global), so no fixtures needed here."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user(
+            username="explorer", password="pw123456")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_login_required(self):
+        self.client.logout()
+        resp = self.client.get(reverse("knowledge:explorer"))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_explorer_renders_with_catalogue(self):
+        resp = self.client.get(reverse("knowledge:explorer"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Rule Explorer")
+        self.assertEqual(resp.context["total_rules"], Rule.objects.count())
+        self.assertTrue(resp.context["rows"])
+
+    def test_search_narrows_and_ranks(self):
+        resp = self.client.get(
+            reverse("knowledge:explorer"), {"q": "minimum de perception"})
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.context["rows"]
+        slugs = [r["slug"] for r in rows]
+        self.assertIn("cgi-2025-is-minimum-tax", slugs)
+        # a focused query returns far fewer than the whole base
+        self.assertLess(resp.context["result_count"],
+                        resp.context["total_rules"])
+
+    def test_framework_filter(self):
+        resp = self.client.get(
+            reverse("knowledge:explorer"), {"framework": "CGI-2025"})
+        self.assertTrue(resp.context["rows"])
+        self.assertTrue(
+            all(r["framework"] == "CGI-2025" for r in resp.context["rows"]))
+
+    def test_slice_filter(self):
+        resp = self.client.get(
+            reverse("knowledge:explorer"), {"slice": "K10"})
+        self.assertTrue(resp.context["rows"])
+        self.assertTrue(
+            all(r["knowledge_slice"] == "K10" for r in resp.context["rows"]))
+
+    def test_rule_detail_renders(self):
+        resp = self.client.get(
+            reverse("knowledge:rule_detail", args=["cgi-2025-is-rate"]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "art. 17")
+        self.assertContains(resp, "Copy citation")
+        # structured DSL is rendered
+        self.assertContains(resp, "taux_standard_pct")
+
+    def test_rule_detail_unknown_slug_404(self):
+        resp = self.client.get(
+            reverse("knowledge:rule_detail", args=["nope-not-a-rule"]))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_detail_exposes_citation_source(self):
+        resp = self.client.get(
+            reverse("knowledge:rule_detail", args=["cgi-2025-is-minimum-tax"]))
+        self.assertContains(resp, 'id="kd-citation-src"')

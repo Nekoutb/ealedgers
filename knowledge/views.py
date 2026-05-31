@@ -15,11 +15,13 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from accounting.middleware import tenant_required
 
-from .models import Rule
+from .forms import TenantProcedureForm, unique_procedure_slug
+from .models import Rule, TenantProcedure
 from .retrieval import retrieve
 
 
@@ -147,6 +149,7 @@ def explorer_view(request):
         "sel_slice": knowledge_slice or "",
         "pending_review": all_rules.filter(
             review_status="needs_review").count(),
+        "has_tenant": getattr(request, "tenant", None) is not None,
     }
     return render(request, "knowledge/explorer.html", context)
 
@@ -171,3 +174,72 @@ def rule_detail_view(request, slug):
         "citation_text": citation,
     }
     return render(request, "knowledge/rule_detail.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Step 24 — tenant-procedure UI (a tenant's own rules)
+# ---------------------------------------------------------------------------
+
+
+@login_required
+@tenant_required
+def procedure_list_view(request):
+    """GET /knowledge/procedures/ — the active tenant's own procedures."""
+    procs = list(
+        TenantProcedure.objects.for_tenant(request.tenant)
+        .select_related("overrides_rule")
+        .order_by("-updated_at")
+    )
+    return render(request, "knowledge/procedures_list.html", {
+        "page_name": "Knowledge Base",
+        "procedures": procs,
+        "proc_count": len(procs),
+    })
+
+
+@login_required
+@tenant_required
+def procedure_create_view(request):
+    """GET/POST /knowledge/procedures/new/ — create a procedure for the
+    active tenant. Saved in ``pending`` state for the Step-25 validator."""
+    if request.method == "POST":
+        form = TenantProcedureForm(request.POST, tenant=request.tenant)
+        if form.is_valid():
+            proc = form.save(commit=False)
+            proc.tenant = request.tenant
+            proc.slug = unique_procedure_slug(
+                request.tenant, form.cleaned_data["title"])
+            proc.created_by = request.user
+            proc.validation_status = "pending"
+            proc.save()
+            return redirect(reverse("knowledge:procedure_list"))
+    else:
+        form = TenantProcedureForm(tenant=request.tenant)
+    return render(request, "knowledge/procedure_form.html", {
+        "page_name": "Knowledge Base", "form": form, "mode": "create",
+    })
+
+
+@login_required
+@tenant_required
+def procedure_edit_view(request, slug):
+    """GET/POST /knowledge/procedures/<slug>/edit/ — edit one of the active
+    tenant's procedures. Editing content resets it to ``pending`` so the
+    framework-conflict check re-runs. 404 for another tenant's slug."""
+    proc = get_object_or_404(
+        TenantProcedure.objects.for_tenant(request.tenant), slug=slug)
+    if request.method == "POST":
+        form = TenantProcedureForm(
+            request.POST, instance=proc, tenant=request.tenant)
+        if form.is_valid():
+            obj = form.save(commit=False)
+            obj.tenant = request.tenant  # ownership never changes
+            obj.validation_status = "pending"
+            obj.save()
+            return redirect(reverse("knowledge:procedure_list"))
+    else:
+        form = TenantProcedureForm(instance=proc, tenant=request.tenant)
+    return render(request, "knowledge/procedure_form.html", {
+        "page_name": "Knowledge Base", "form": form,
+        "mode": "edit", "procedure": proc,
+    })

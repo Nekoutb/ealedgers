@@ -165,6 +165,11 @@ class RetrieveTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        # Isolate from migration-loaded knowledge slices (K01 ships 12 rules
+        # via migration 0002). These tests assert exact result sets, so start
+        # from a clean Rule table and seed our own small corpus.
+        Rule.objects.all().delete()
+
         User = get_user_model()
         cls.user = User.objects.create_superuser("ret_admin", "a@a.test", "x")
         cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
@@ -266,6 +271,10 @@ class RetrieveEndpointTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        # Isolate from migration-loaded K01 rules (this test asserts the
+        # top result is its own seeded rule).
+        Rule.objects.all().delete()
+
         User = get_user_model()
         cls.user = User.objects.create_superuser("ep_admin", "a@a.test", "x")
         cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
@@ -299,3 +308,68 @@ class RetrieveEndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         # no crash; k clamped to <= 50
         self.assertLessEqual(len(r.json()["results"]), 50)
+
+
+# ---------------------------------------------------------------------------
+# Step 15 — K01 SYSCOHADA chart-of-accounts knowledge slice
+# ---------------------------------------------------------------------------
+
+
+class K01LoaderTests(TestCase):
+    """The K01 slice loads (the data migration runs in the test DB, so the
+    rules are already present) and the loader is idempotent + retrievable."""
+
+    def test_k01_rules_present(self):
+        # Migration 0002 loads them during test-DB setup.
+        n = Rule.objects.filter(knowledge_slice="K01",
+                                framework="SYSCOHADA-2017").count()
+        self.assertEqual(n, 12)
+
+    def test_all_nine_classes_encoded(self):
+        for cls in range(1, 10):
+            self.assertTrue(
+                Rule.objects.filter(slug=f"syscohada-class-{cls}").exists(),
+                f"class {cls} rule missing",
+            )
+
+    def test_class_rules_carry_statement_mapping(self):
+        # Classes 1–5 → balance sheet; 6–8 → income statement.
+        for cls in (1, 2, 3, 4, 5):
+            r = Rule.objects.get(slug=f"syscohada-class-{cls}")
+            self.assertEqual(r.effects["statement"], "balance_sheet")
+        for cls in (6, 7, 8):
+            r = Rule.objects.get(slug=f"syscohada-class-{cls}")
+            self.assertEqual(r.effects["statement"], "income_statement")
+
+    def test_rules_need_expert_review(self):
+        # All K01 rules start needs_review until the Step-27 expert gate.
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K01")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_loader_is_idempotent(self):
+        from knowledge.loaders import load_slice
+        before = Rule.objects.filter(knowledge_slice="K01").count()
+        created, updated = load_slice(Rule, "K01")
+        after = Rule.objects.filter(knowledge_slice="K01").count()
+        self.assertEqual(created, 0)       # nothing new
+        self.assertEqual(updated, before)  # all re-synced
+        self.assertEqual(after, before)    # count unchanged
+
+    def test_loader_rejects_unknown_slice(self):
+        from knowledge.loaders import load_slice
+        with self.assertRaises(ValueError):
+            load_slice(Rule, "K99")
+
+    def test_french_query_retrieves_class_4(self):
+        res = retrieve("comptes fournisseurs et clients tiers",
+                       framework="SYSCOHADA-2017", k=3)
+        self.assertEqual(res[0]["slug"], "syscohada-class-4")
+
+    def test_management_command_runs(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command("load_knowledge", slice_id="K01", stdout=out)
+        self.assertIn("complete", out.getvalue())

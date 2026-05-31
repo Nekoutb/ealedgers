@@ -17,11 +17,15 @@ from django.test.utils import override_settings
 from accounting.middleware import TenantContextMiddleware
 from accounting.models import (
     Account,
+    AgentRun,
+    AgentToolCall,
     BankStatement,
     BankStatementLine,
     Currency,
     CustomerInvoice,
     CustomerInvoiceLine,
+    ERPConnection,
+    ERPOperation,
     FxRate,
     Journal,
     JournalEntry,
@@ -30,6 +34,7 @@ from accounting.models import (
     Partner,
     Period,
     PeriodLock,
+    Provenance,
     SupplierBill,
     SupplierBillLine,
     parse_bank_csv,
@@ -1877,4 +1882,243 @@ class FxRateTests(TestCase):
         self.assertEqual(
             FxRate.get_rate(self.eur, self.eur, date(2026, 5, 30)),
             Decimal("1"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Step 7 — Provenance / AgentRun / AgentToolCall / ERPConnection / ERPOperation
+# ---------------------------------------------------------------------------
+
+
+class AgentRunModelTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_ar", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("agent-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+
+    def test_create_run_default_status(self):
+        r = AgentRun.objects.create(
+            tenant=self.tenant, department="D01", task="classify_vendor_bill",
+        )
+        self.assertEqual(r.status, "pending")
+        self.assertEqual(r.input_tokens, 0)
+        self.assertEqual(r.output_tokens, 0)
+        self.assertEqual(r.total_tokens, 0)
+        self.assertIsNone(r.duration_seconds)
+
+    def test_total_tokens(self):
+        r = AgentRun.objects.create(
+            tenant=self.tenant, department="D06", task="compute_vat",
+            input_tokens=1500, output_tokens=320,
+        )
+        self.assertEqual(r.total_tokens, 1820)
+
+    def test_chain_id_links_runs(self):
+        chain = "doc-abc-123"
+        AgentRun.objects.create(
+            tenant=self.tenant, department="dispatcher", task="route",
+            chain_id=chain,
+        )
+        AgentRun.objects.create(
+            tenant=self.tenant, department="D01", task="propose_bill",
+            chain_id=chain,
+        )
+        AgentRun.objects.create(
+            tenant=self.tenant, department="D06", task="vat_impact",
+            chain_id=chain,
+        )
+        related = AgentRun.objects.for_tenant(self.tenant).filter(chain_id=chain)
+        self.assertEqual(related.count(), 3)
+        self.assertEqual(
+            sorted(related.values_list("department", flat=True)),
+            ["D01", "D06", "dispatcher"],
+        )
+
+    def test_string_repr(self):
+        r = AgentRun.objects.create(
+            tenant=self.tenant, department="D04", task="depreciate",
+            status="executed",
+        )
+        self.assertIn("D04", str(r))
+        self.assertIn("depreciate", str(r))
+        self.assertIn("executed", str(r))
+
+
+class AgentToolCallTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_tc", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("tool-co", currency=cls.xaf, owner=cls.alice)
+        cls.agent_run = AgentRun.objects.create(
+            tenant=cls.tenant, department="D01", task="post_bill",
+        )
+
+    def test_create_tool_call(self):
+        tc = AgentToolCall.objects.create(
+            tenant=self.tenant, agent_run=self.agent_run, sequence=0,
+            tool="erp.post_je",
+            arguments={"date": "2026-05-31", "lines": [{"debit": 100}]},
+            status="success",
+            result={"je_id": 42},
+        )
+        self.assertEqual(tc.tool, "erp.post_je")
+        self.assertEqual(tc.arguments["lines"][0]["debit"], 100)
+        self.assertEqual(tc.result["je_id"], 42)
+
+    def test_ordering_by_sequence_within_run(self):
+        for i, tool in enumerate(["knowledge.retrieve", "chart.lookup",
+                                   "erp.post_je"]):
+            AgentToolCall.objects.create(
+                tenant=self.tenant, agent_run=self.agent_run, sequence=i, tool=tool,
+            )
+        ordered = list(
+            self.agent_run.tool_calls.order_by("sequence").values_list("tool", flat=True)
+        )
+        self.assertEqual(ordered, ["knowledge.retrieve", "chart.lookup",
+                                    "erp.post_je"])
+
+
+class ERPConnectionTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_erp", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("erp-co", currency=cls.xaf, owner=cls.alice)
+
+    def test_create_connection_default_health(self):
+        c = ERPConnection.objects.create(
+            tenant=self.tenant, name="Prod Odoo", vendor="odoo", version="17.0",
+            config={"url": "https://odoo.example.com",
+                    "auth_env_var": "ODOO_API_KEY"},
+        )
+        self.assertEqual(c.health, "unconfigured")
+        self.assertTrue(c.is_active)
+        self.assertFalse(c.is_primary)
+        self.assertEqual(c.capabilities, [])
+
+    def test_capabilities_list(self):
+        c = ERPConnection.objects.create(
+            tenant=self.tenant, name="Sandbox", vendor="odoo",
+            capabilities=["CAP.01", "CAP.02", "CAP.03"],
+        )
+        self.assertIn("CAP.03", c.capabilities)
+
+
+class ERPOperationTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_eo", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("op-co", currency=cls.xaf, owner=cls.alice)
+        cls.conn = ERPConnection.objects.create(
+            tenant=cls.tenant, name="Odoo", vendor="odoo", version="17.0",
+        )
+
+    def test_create_operation(self):
+        op = ERPOperation.objects.create(
+            tenant=self.tenant, connection=self.conn,
+            capability="CAP.03", method="account.move.create",
+            request={"date": "2026-05-31"},
+            response={"id": 1234},
+            external_ids={"move_id": 1234},
+            status="success",
+        )
+        self.assertEqual(op.external_ids["move_id"], 1234)
+        self.assertEqual(op.status, "success")
+        self.assertEqual(op.retry_count, 0)
+
+    def test_capability_filtering(self):
+        ERPOperation.objects.create(
+            tenant=self.tenant, connection=self.conn,
+            capability="CAP.01", status="success",
+        )
+        ERPOperation.objects.create(
+            tenant=self.tenant, connection=self.conn,
+            capability="CAP.03", status="success",
+        )
+        ERPOperation.objects.create(
+            tenant=self.tenant, connection=self.conn,
+            capability="CAP.03", status="failed",
+        )
+        cap03 = ERPOperation.objects.filter(tenant=self.tenant, capability="CAP.03")
+        self.assertEqual(cap03.count(), 2)
+        self.assertEqual(
+            cap03.filter(status="success").count(), 1
+        )
+
+
+class ProvenanceTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_pv", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("prov-co", currency=cls.xaf, owner=cls.alice)
+        cls.agent_run = AgentRun.objects.create(
+            tenant=cls.tenant, department="D01", task="post_bill", status="executed",
+        )
+
+    def test_create_provenance_with_agent_run(self):
+        pv = Provenance.objects.create(
+            tenant=self.tenant, source="agent", agent_run=self.agent_run,
+            chain_id="doc-xyz",
+            summary="Posted vendor bill for KISSYWEARS, 50 000 XAF",
+            citations=["K01:412300", "K11:art-149"],
+            extra={"vendor": "KISSYWEARS"},
+        )
+        self.assertEqual(pv.source, "agent")
+        self.assertEqual(pv.citations, ["K01:412300", "K11:art-149"])
+        self.assertEqual(pv.extra["vendor"], "KISSYWEARS")
+        self.assertEqual(pv.agent_run, self.agent_run)
+
+    def test_chain_id_groups_provenance(self):
+        chain = "doc-abc-123"
+        Provenance.objects.create(
+            tenant=self.tenant, source="agent", chain_id=chain,
+            summary="Bill classified",
+        )
+        Provenance.objects.create(
+            tenant=self.tenant, source="agent", chain_id=chain,
+            summary="Bill posted",
+        )
+        Provenance.objects.create(
+            tenant=self.tenant, source="system", chain_id=chain,
+            summary="VAT impact updated",
+        )
+        related = Provenance.objects.for_tenant(self.tenant).filter(chain_id=chain)
+        self.assertEqual(related.count(), 3)
+        # Confirm all 3 source types come back
+        sources = sorted(set(related.values_list("source", flat=True)))
+        self.assertEqual(sources, ["agent", "system"])
+
+    def test_tenant_isolation(self):
+        other_user = get_user_model().objects.create_user("ozzy_pv", "o@o.test", "x")
+        other = _make_tenant("other-pv", currency=self.xaf, owner=other_user)
+        Provenance.objects.create(
+            tenant=self.tenant, source="manual", summary="ACME-OWN",
+        )
+        Provenance.objects.create(
+            tenant=other, source="manual", summary="OTHER-OWN",
+        )
+        self.assertEqual(
+            list(Provenance.objects.for_tenant(self.tenant)
+                 .values_list("summary", flat=True)),
+            ["ACME-OWN"],
+        )
+        self.assertEqual(
+            list(Provenance.objects.for_tenant(other)
+                 .values_list("summary", flat=True)),
+            ["OTHER-OWN"],
         )

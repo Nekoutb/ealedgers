@@ -1,0 +1,44 @@
+# systemd unit for the Django-Q2 background worker (qcluster).
+#
+# Part of the SSH bundle (Steps 3 + 5 + 10). NOT installed automatically —
+# copy this to the server during that session:
+#
+#   sudo cp scripts/ealedgers-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ealedgers-worker.service
+#   sudo systemctl status ealedgers-worker.service
+#
+# Mirrors the existing ealedgers.service (gunicorn) pattern: same user,
+# same venv, same env file, same working directory. The only difference is
+# the ExecStart runs `manage.py qcluster` instead of gunicorn.
+#
+# After this unit exists on the server, add one line to the GitHub Actions
+# deploy (`.github/workflows/deploy.yml`) so each deploy restarts the worker
+# alongside the web process:
+#
+#   systemctl restart ealedgers-worker.service
+#
+# (Do NOT add that line before the unit exists, or the deploy step fails.)
+
+[Unit]
+Description=EA Ledgers — Django-Q2 background worker (qcluster)
+After=network.target postgresql.service
+# Wants, not Requires: the worker should still start if PG check is flaky;
+# on SQLite this dependency is simply inert.
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ealedgers
+Group=ealedgers
+WorkingDirectory=/opt/ealedgers/app
+EnvironmentFile=/opt/ealedgers/.env
+ExecStart=/opt/ealedgers/venv/bin/python manage.py qcluster
+Restart=on-failure
+RestartSec=5
+# Give in-flight tasks time to finish on stop/restart (matches Q_CLUSTER
+# timeout of 600s, capped here for deploy responsiveness).
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

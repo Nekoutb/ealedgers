@@ -366,9 +366,21 @@ unlock the next step.
 
 ## §7 — Change log of this document
 
-| Date       | Step | Change                              |
-| ---------- | ---- | ----------------------------------- |
-| 2026-05-17 | 1    | Initial creation as kickoff of v2.  |
+| Date       | Step | Change                                                                                                       |
+| ---------- | ---- | ------------------------------------------------------------------------------------------------------------ |
+| 2026-05-17 | 1    | Initial creation as kickoff of v2.                                                                            |
+| 2026-05-30 | 2    | PR #14 (Postgres prep) closed as superseded by PR #21 (renumbered migration 0006→0008; tables list updated). |
+| 2026-05-31 | 3    | Cutover **scheduled** (owner picked Option B). Plan continues from Step 4 in the meantime.                    |
+| 2026-05-31 | 3    | cmapi-vs-ealedgers audit added at `docs/cmapi_vs_ealedgers_audit.md`. cmapi-mirror items folded in (later).   |
+| 2026-05-31 | 4    | ensure_admin command + post_migrate signal landed (R4 enforced).                                              |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.
+
+### Step 3 scheduling notes (added 2026-05-31)
+
+- **Status:** pending scheduled window.
+- **Runbook:** `docs/postgres-cutover.md`.
+- **Pre-cutover prep already done:** PR #21 landed (Postgres-aware settings, RLS migration `0008`, psycopg dep).
+- **Steps unblocked by Step 3:** Step 5 (pgvector), Step 10 (vhost — also needs SSH).
+- **Steps that proceed in the meantime:** 4 (done), 6, 7, 8, 9, 11, 12 (code-only parts).

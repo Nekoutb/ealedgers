@@ -11,6 +11,9 @@
       <h1 class="ke-title">Rule Explorer</h1>
       <p class="ke-lede">Every rule the agents reason over — sourced, cited,
         and traceable to its framework article.</p>
+      {% if has_tenant %}
+        <a class="ke-proclink" href="{% url 'knowledge:procedure_list' %}">Your firm’s procedures →</a>
+      {% endif %}
     </div>
     <dl class="ke-stats" aria-label="Knowledge base statistics">
       <div class="ke-stat"><dt>Rules</dt><dd>{{ total_rules }}</dd></div>
@@ -127,6 +130,9 @@
                 color:var(--ke-brand); font-weight:600; }
   .ke-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .15rem; }
   .ke-lede { color:var(--ke-muted); max-width:46ch; font-size:.95rem; }
+  .ke-proclink { display:inline-block; margin-top:.7rem; font-size:.86rem; font-weight:600;
+                 color:var(--ke-brand); text-decoration:none; }
+  .ke-proclink:hover { text-decoration:underline; text-underline-offset:3px; }
   .ke-stats { display:flex; gap:.6rem; margin:0; flex-wrap:wrap; }
   .ke-stat { background:#fff; border:1px solid var(--ke-hair); border-radius:12px;
              padding:.55rem .9rem; min-width:84px; }

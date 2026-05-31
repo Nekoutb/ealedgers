@@ -1,0 +1,120 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}Your Procedures · Knowledge Base{% endblock %}
+
+{% block content %}
+<section class="kp">
+
+  <header class="kp-head">
+    <div>
+      <div class="kp-eyebrow">Knowledge Base</div>
+      <h1 class="kp-title">Your Procedures</h1>
+      <p class="kp-lede">Your firm’s own rules — they specialise the framework
+        defaults (and are checked never to violate them).</p>
+    </div>
+    <div class="kp-head-actions">
+      <a class="kp-btn kp-btn--ghost" href="{% url 'knowledge:explorer' %}">Browse framework rules</a>
+      <a class="kp-btn kp-btn--go" href="{% url 'knowledge:procedure_create' %}">+ New procedure</a>
+    </div>
+  </header>
+
+  {% if procedures %}
+    <ul class="kp-list">
+      {% for p in procedures %}
+        <li class="kp-card" data-status="{{ p.validation_status }}">
+          <div class="kp-card-main">
+            <div class="kp-card-top">
+              {% if p.validation_status == "validated" %}
+                <span class="kp-badge kp-badge--ok">Validated</span>
+              {% elif p.validation_status == "conflict" %}
+                <span class="kp-badge kp-badge--bad">Conflicts with framework</span>
+              {% else %}
+                <span class="kp-badge kp-badge--warn">Pending validation</span>
+              {% endif %}
+              {% if not p.active %}<span class="kp-badge kp-badge--mute">Inactive</span>{% endif %}
+            </div>
+            <h2 class="kp-card-title">{{ p.title }}</h2>
+            {% if p.description %}<p class="kp-card-desc">{{ p.description }}</p>{% endif %}
+            {% if p.overrides_rule %}
+              <div class="kp-overrides">Specialises
+                <a href="{% url 'knowledge:rule_detail' p.overrides_rule.slug %}">{{ p.overrides_rule.source_ref|default:p.overrides_rule.title }}</a>
+              </div>
+            {% endif %}
+            {% if p.validation_status == "conflict" and p.validation_notes %}
+              <div class="kp-conflict-note">{{ p.validation_notes }}</div>
+            {% endif %}
+          </div>
+          <div class="kp-card-side">
+            <a class="kp-edit" href="{% url 'knowledge:procedure_edit' p.slug %}">Edit</a>
+            <span class="kp-updated">{{ p.updated_at|date:"Y-m-d" }}</span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="kp-empty">
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6M9 15h6"/></svg>
+      <p>No procedures yet. Add your firm’s first rule — for example,
+         “Vehicles depreciate over 4 years”.</p>
+      <a class="kp-btn kp-btn--go" href="{% url 'knowledge:procedure_create' %}">+ New procedure</a>
+    </div>
+  {% endif %}
+
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .kp { --kp-ink:#0a0a0a; --kp-muted:#737373; --kp-hair:#e5e5e5; --kp-brand:#0d9488;
+        --kp-brand-soft:#ccfbf1; --kp-warn:#b45309; --kp-warn-soft:#fef3c7;
+        --kp-ok:#047857; --kp-ok-soft:#d1fae5; --kp-bad:#b91c1c; --kp-bad-soft:#fee2e2;
+        color:var(--kp-ink); }
+  .kp-head { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+             gap:1.2rem 2rem; padding-bottom:1.4rem; border-bottom:1px solid var(--kp-hair); }
+  .kp-eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--kp-brand); font-weight:600; }
+  .kp-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .15rem; }
+  .kp-lede { color:var(--kp-muted); max-width:48ch; font-size:.95rem; }
+  .kp-head-actions { display:flex; gap:.6rem; flex-wrap:wrap; }
+
+  .kp-btn { font-family:inherit; font-weight:600; border-radius:11px; padding:.7rem 1.2rem; font-size:.88rem;
+            cursor:pointer; border:1px solid transparent; text-decoration:none; display:inline-block;
+            transition:background .15s, transform .08s, border-color .15s; }
+  .kp-btn:active { transform:translateY(1px); }
+  .kp-btn--go { background:var(--kp-ink); color:#fff; }
+  .kp-btn--go:hover { background:#262626; }
+  .kp-btn--ghost { background:#fff; border-color:var(--kp-hair); color:var(--kp-ink); }
+  .kp-btn--ghost:hover { background:#fafafa; border-color:#d4d4d4; }
+
+  .kp-list { list-style:none; padding:0; margin:1.4rem 0 0; display:grid; gap:.8rem; }
+  .kp-card { background:#fff; border:1px solid var(--kp-hair); border-radius:14px; padding:1.1rem 1.25rem;
+             display:flex; gap:1rem; justify-content:space-between; position:relative; overflow:hidden;
+             transition:border-color .15s, box-shadow .15s; }
+  .kp-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--kp-warn); }
+  .kp-card[data-status="validated"]::before { background:var(--kp-ok); }
+  .kp-card[data-status="conflict"]::before { background:var(--kp-bad); }
+  .kp-card:hover { border-color:#d4d4d4; box-shadow:0 6px 22px -12px rgba(0,0,0,.18); }
+  .kp-card-main { min-width:0; }
+  .kp-card-top { display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.5rem; }
+  .kp-badge { font-size:.66rem; font-weight:600; letter-spacing:.03em; padding:.2rem .55rem; border-radius:999px; white-space:nowrap; }
+  .kp-badge--warn { background:var(--kp-warn-soft); color:var(--kp-warn); }
+  .kp-badge--ok { background:var(--kp-ok-soft); color:var(--kp-ok); }
+  .kp-badge--bad { background:var(--kp-bad-soft); color:var(--kp-bad); }
+  .kp-badge--mute { background:#f5f5f5; color:#737373; }
+  .kp-card-title { font-size:1.08rem; font-weight:600; line-height:1.25; letter-spacing:-.01em; margin:0 0 .35rem; }
+  .kp-card-desc { font-size:.9rem; line-height:1.55; color:#3f3f3f; margin:0 0 .4rem; }
+  .kp-overrides { font-size:.8rem; color:var(--kp-muted); }
+  .kp-overrides a { color:var(--kp-brand); font-family:"Geist Mono", ui-monospace, monospace; text-decoration:none; }
+  .kp-overrides a:hover { text-decoration:underline; }
+  .kp-conflict-note { margin-top:.5rem; font-size:.82rem; color:var(--kp-bad); background:var(--kp-bad-soft);
+                      border-radius:8px; padding:.5rem .7rem; }
+  .kp-card-side { display:flex; flex-direction:column; align-items:flex-end; justify-content:space-between; gap:.6rem; flex-shrink:0; }
+  .kp-edit { font-size:.84rem; font-weight:600; color:var(--kp-brand); text-decoration:none; }
+  .kp-edit:hover { text-decoration:underline; }
+  .kp-updated { font-size:.72rem; color:var(--kp-muted); font-family:"Geist Mono", ui-monospace, monospace; }
+
+  .kp-empty { text-align:center; padding:4rem 1rem; color:var(--kp-muted); }
+  .kp-empty svg { color:#d4d4d4; margin-bottom:.8rem; }
+  .kp-empty p { max-width:40ch; margin:0 auto 1.2rem; line-height:1.6; }
+
+  @media (max-width:640px) { .kp-title { font-size:1.7rem; } .kp-card { flex-direction:column; } .kp-card-side { flex-direction:row; align-items:center; } }
+</style>
+{% endblock %}

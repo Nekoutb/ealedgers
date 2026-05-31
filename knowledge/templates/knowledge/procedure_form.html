@@ -1,0 +1,119 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}{% if mode == "edit" %}Edit procedure{% else %}New procedure{% endif %} · Knowledge Base{% endblock %}
+
+{% block content %}
+<section class="kf">
+
+  <a class="kf-back" href="{% url 'knowledge:procedure_list' %}">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+    Your Procedures
+  </a>
+
+  <h1 class="kf-title">{% if mode == "edit" %}Edit procedure{% else %}New procedure{% endif %}</h1>
+  <p class="kf-lede">A procedure is your firm’s own rule. It will be checked
+    against the framework — a procedure that <em>violates</em> a framework rule
+    is blocked, but one that <em>specialises</em> it (a stricter rate, a shorter
+    life) is allowed.</p>
+
+  <form class="kf-form" method="post" novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="kf-errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="kf-field">
+      <label for="{{ form.title.id_for_label }}">Title</label>
+      {{ form.title }}
+      {% if form.title.errors %}<div class="kf-err">{{ form.title.errors|striptags }}</div>{% endif %}
+    </div>
+
+    <div class="kf-field">
+      <label for="{{ form.description.id_for_label }}">Description</label>
+      {{ form.description }}
+      <div class="kf-help">A plain statement a colleague (or the agent) can read.</div>
+      {% if form.description.errors %}<div class="kf-err">{{ form.description.errors|striptags }}</div>{% endif %}
+    </div>
+
+    <div class="kf-field">
+      <label for="{{ form.overrides_rule.id_for_label }}">{{ form.overrides_rule.label }}</label>
+      {{ form.overrides_rule }}
+      <div class="kf-help">Link the framework rule this procedure refines, so the validator knows what to compare against.</div>
+      {% if form.overrides_rule.errors %}<div class="kf-err">{{ form.overrides_rule.errors|striptags }}</div>{% endif %}
+    </div>
+
+    <div class="kf-grid">
+      <div class="kf-field">
+        <label for="{{ form.trigger_conditions.id_for_label }}">Trigger conditions <span class="kf-opt">JSON · optional</span></label>
+        {{ form.trigger_conditions }}
+        <div class="kf-help">{{ form.trigger_conditions.help_text }}</div>
+        {% if form.trigger_conditions.errors %}<div class="kf-err">{{ form.trigger_conditions.errors|striptags }}</div>{% endif %}
+      </div>
+      <div class="kf-field">
+        <label for="{{ form.effects.id_for_label }}">Effects <span class="kf-opt">JSON · optional</span></label>
+        {{ form.effects }}
+        <div class="kf-help">{{ form.effects.help_text }}</div>
+        {% if form.effects.errors %}<div class="kf-err">{{ form.effects.errors|striptags }}</div>{% endif %}
+      </div>
+    </div>
+
+    <label class="kf-check">
+      {{ form.active }}
+      <span>Active — the agent may apply this procedure</span>
+    </label>
+
+    <div class="kf-actions">
+      <button type="submit" class="kf-btn kf-btn--go">{% if mode == "edit" %}Save changes{% else %}Create procedure{% endif %}</button>
+      <a class="kf-btn kf-btn--ghost" href="{% url 'knowledge:procedure_list' %}">Cancel</a>
+    </div>
+    <p class="kf-note">On save, this procedure is queued as <strong>pending</strong>
+      for the framework-conflict check.</p>
+  </form>
+
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .kf { --kf-ink:#0a0a0a; --kf-muted:#737373; --kf-hair:#e5e5e5; --kf-brand:#0d9488;
+        --kf-brand-soft:#ccfbf1; --kf-bad:#b91c1c; --kf-bad-soft:#fee2e2; color:var(--kf-ink); max-width:680px; }
+  .kf-back { display:inline-flex; align-items:center; gap:.35rem; font-size:.85rem; font-weight:500; color:var(--kf-muted); text-decoration:none; margin-bottom:1.1rem; }
+  .kf-back:hover { color:var(--kf-ink); }
+  .kf-title { font-size:1.75rem; font-weight:650; letter-spacing:-.02em; margin:0 0 .35rem; }
+  .kf-lede { color:var(--kf-muted); font-size:.92rem; line-height:1.6; margin:0 0 1.6rem; }
+  .kf-lede em { color:var(--kf-ink); font-style:normal; font-weight:600; }
+
+  .kf-form { display:flex; flex-direction:column; gap:1.15rem; }
+  .kf-errors { background:var(--kf-bad-soft); color:var(--kf-bad); border-radius:10px; padding:.7rem 1rem; font-size:.88rem; }
+  .kf-field { display:flex; flex-direction:column; gap:.35rem; }
+  .kf-field > label { font-size:.82rem; font-weight:600; letter-spacing:.01em; }
+  .kf-opt { font-weight:400; color:var(--kf-muted); font-size:.74rem; font-family:"Geist Mono", ui-monospace, monospace; }
+  .kf-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.15rem; }
+
+  .kf-form input[type=text], .kf-form textarea, .kf-form select {
+    width:100%; border:1px solid var(--kf-hair); border-radius:11px; padding:.7rem .85rem;
+    font-size:.92rem; font-family:inherit; background:#fff; color:var(--kf-ink);
+    transition:border-color .15s, box-shadow .15s; }
+  .kf-form textarea.kp-json { font-family:"Geist Mono", ui-monospace, monospace; font-size:.82rem; line-height:1.5; }
+  .kf-form input:focus, .kf-form textarea:focus, .kf-form select:focus {
+    outline:none; border-color:var(--kf-brand); box-shadow:0 0 0 3px var(--kf-brand-soft); }
+  .kf-help { font-size:.78rem; color:var(--kf-muted); line-height:1.45; }
+  .kf-err { font-size:.8rem; color:var(--kf-bad); font-weight:500; }
+
+  .kf-check { display:flex; align-items:center; gap:.55rem; font-size:.9rem; cursor:pointer; }
+  .kf-check input { width:1.05rem; height:1.05rem; accent-color:var(--kf-brand); }
+
+  .kf-actions { display:flex; gap:.6rem; margin-top:.4rem; }
+  .kf-btn { font-family:inherit; font-weight:600; border-radius:11px; padding:.75rem 1.4rem; font-size:.9rem;
+            cursor:pointer; border:1px solid transparent; text-decoration:none; display:inline-block; transition:background .15s, transform .08s, border-color .15s; }
+  .kf-btn:active { transform:translateY(1px); }
+  .kf-btn--go { background:var(--kf-ink); color:#fff; }
+  .kf-btn--go:hover { background:#262626; }
+  .kf-btn--ghost { background:#fff; border-color:var(--kf-hair); color:var(--kf-ink); }
+  .kf-btn--ghost:hover { background:#fafafa; border-color:#d4d4d4; }
+  .kf-note { font-size:.8rem; color:var(--kf-muted); margin:.2rem 0 0; }
+  .kf-note strong { color:var(--kf-ink); }
+
+  @media (max-width:640px) { .kf-grid { grid-template-columns:1fr; } .kf-title { font-size:1.4rem; } }
+</style>
+{% endblock %}

@@ -854,3 +854,109 @@ class RuleExplorerViewTests(TestCase):
         resp = self.client.get(
             reverse("knowledge:rule_detail", args=["cgi-2025-is-minimum-tax"]))
         self.assertContains(resp, 'id="kd-citation-src"')
+
+
+# ---------------------------------------------------------------------------
+# Step 24 — tenant-procedure UI
+# ---------------------------------------------------------------------------
+
+
+class ProcedureUIViewTests(TestCase):
+    """List / create / edit a tenant's own procedures, tenant-scoped."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user("proc_user", "p@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(
+            code="XAF", name="CFA Franc", decimal_places=0)
+        cls.acme = Tenant.objects.create(
+            slug="acme-proc", name="Acme Proc", currency=cls.xaf, owner=cls.user)
+        cls.beta = Tenant.objects.create(
+            slug="beta-proc", name="Beta Proc", currency=cls.xaf, owner=cls.user)
+        Membership.objects.create(user=cls.user, tenant=cls.acme, role="owner")
+        # A procedure in a tenant the user is NOT browsing (isolation probe).
+        cls.beta_proc = TenantProcedure.objects.create(
+            tenant=cls.beta, slug="beta-secret", title="Beta secret rule")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_list_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("knowledge:procedure_list"))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_list_requires_tenant(self):
+        User = get_user_model()
+        orphan = User.objects.create_user("orphan", "o@a.test", "pw123456")
+        self.client.force_login(orphan)
+        resp = self.client.get(reverse("knowledge:procedure_list"))
+        # @tenant_required bounces a tenant-less user to the workspace
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/workspace/", resp["Location"])
+
+    def test_list_shows_only_own_tenant(self):
+        TenantProcedure.objects.create(
+            tenant=self.acme, slug="acme-vehicles",
+            title="Vehicles over 4 years")
+        resp = self.client.get(reverse("knowledge:procedure_list"))
+        self.assertEqual(resp.status_code, 200)
+        slugs = [p.slug for p in resp.context["procedures"]]
+        self.assertIn("acme-vehicles", slugs)
+        self.assertNotIn("beta-secret", slugs)  # other tenant hidden
+
+    def test_create_get_renders_form(self):
+        resp = self.client.get(reverse("knowledge:procedure_create"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "New procedure")
+
+    def test_create_post_creates_pending_procedure(self):
+        resp = self.client.post(reverse("knowledge:procedure_create"), {
+            "title": "Vehicles over 4 years",
+            "description": "Straight-line, 48 months.",
+            "overrides_rule": "",
+            "trigger_conditions": '{"asset_class": "vehicles"}',
+            "effects": '{"useful_life_months": 48}',
+            "active": "on",
+        })
+        self.assertEqual(resp.status_code, 302)
+        proc = TenantProcedure.objects.for_tenant(self.acme).get(
+            slug="vehicles-over-4-years")
+        self.assertEqual(proc.tenant, self.acme)
+        self.assertEqual(proc.validation_status, "pending")
+        self.assertEqual(proc.created_by, self.user)
+        self.assertEqual(proc.effects["useful_life_months"], 48)
+
+    def test_create_rejects_invalid_json(self):
+        resp = self.client.post(reverse("knowledge:procedure_create"), {
+            "title": "Bad json proc",
+            "description": "x",
+            "trigger_conditions": "{not valid json",
+            "effects": "",
+        })
+        self.assertEqual(resp.status_code, 200)  # re-rendered with errors
+        self.assertFalse(
+            TenantProcedure.objects.filter(slug="bad-json-proc").exists())
+
+    def test_edit_updates_and_resets_to_pending(self):
+        proc = TenantProcedure.objects.create(
+            tenant=self.acme, slug="edit-me", title="Old title",
+            validation_status="validated")
+        resp = self.client.post(
+            reverse("knowledge:procedure_edit", args=["edit-me"]), {
+                "title": "New title",
+                "description": "Updated.",
+                "trigger_conditions": "",
+                "effects": "",
+                "active": "on",
+            })
+        self.assertEqual(resp.status_code, 302)
+        proc.refresh_from_db()
+        self.assertEqual(proc.title, "New title")
+        self.assertEqual(proc.validation_status, "pending")  # re-queued
+
+    def test_edit_other_tenant_404(self):
+        resp = self.client.get(
+            reverse("knowledge:procedure_edit", args=["beta-secret"]))
+        self.assertEqual(resp.status_code, 404)

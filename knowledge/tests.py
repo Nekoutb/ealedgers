@@ -481,3 +481,108 @@ class KnowledgeBaseTotalsTests(TestCase):
             .values_list("knowledge_slice", flat=True)
         )
         self.assertEqual(slices, {"K01", "K15", "K20"})
+
+
+# ---------------------------------------------------------------------------
+# Step 18 — K10 CGI 2025 corporate-income-tax (IS) slice
+# (encoded ahead of K11/TVA: the supplied CGI PDF ends at art. 124 and lacks
+#  the TVA section, so IS — articles 2–23, fully present — is encoded first.)
+# ---------------------------------------------------------------------------
+
+
+class K10LoaderTests(TestCase):
+    """K10 loads via migration 0005 and is retrievable. This is the first
+    tax_code slice (CGI-2025), distinct from the SYSCOHADA framework slices."""
+
+    def test_k10_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K10",
+                                framework="CGI-2025").count()
+        self.assertEqual(n, 30)
+
+    def test_all_k10_are_tax_code_scope(self):
+        # Tax-code slices use scope='tax_code', not 'framework'.
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K10")
+            .exclude(scope="tax_code").exists()
+        )
+
+    def test_key_is_rules_encoded(self):
+        for slug in ("cgi-2025-is-rate",
+                     "cgi-2025-is-minimum-tax",
+                     "cgi-2025-is-loss-carryforward",
+                     "cgi-2025-is-participation-exemption",
+                     "cgi-2025-is-depreciation-rates",
+                     "cgi-2025-is-financial-charges-thin-cap",
+                     "cgi-2025-is-installments-acompte"):
+            self.assertTrue(Rule.objects.filter(slug=slug).exists(),
+                            f"{slug} missing")
+
+    def test_is_rate_effects(self):
+        r = Rule.objects.get(slug="cgi-2025-is-rate")
+        self.assertEqual(r.effects["taux_standard_pct"], 30)
+        self.assertEqual(r.effects["taux_reduit_pct"], 25)
+        self.assertEqual(r.effects["seuil_ca_taux_reduit_fcfa"], 3000000000)
+
+    def test_minimum_tax_effects(self):
+        r = Rule.objects.get(slug="cgi-2025-is-minimum-tax")
+        self.assertEqual(r.effects["taux_regime_reel_avec_cac_pct"], 2.2)
+        self.assertEqual(r.effects["taux_regime_simplifie_avec_cac_pct"], 5.5)
+        self.assertEqual(
+            r.effects["base"],
+            "chiffre_affaires_global_HT_exercice_precedent",
+        )
+
+    def test_loss_carryforward_window(self):
+        r = Rule.objects.get(slug="cgi-2025-is-loss-carryforward")
+        self.assertEqual(r.effects["annees_general"], 4)
+        self.assertEqual(
+            r.effects["annees_etablissements_credit_et_portefeuille"], 6)
+
+    def test_participation_exemption_quote_part(self):
+        r = Rule.objects.get(slug="cgi-2025-is-participation-exemption")
+        self.assertEqual(r.effects["quote_part_frais_et_charges_pct"], 10)
+        self.assertEqual(r.effects["conditions"]["participation_min_pct"], 25)
+
+    def test_depreciation_rate_lookup(self):
+        r = Rule.objects.get(slug="cgi-2025-is-depreciation-rates")
+        self.assertEqual(r.effects["taux_pct"]["materiel_informatique"], 25)
+        self.assertEqual(r.effects["taux_pct"]["mobilier_de_bureau"], 10)
+
+    def test_all_k10_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K10")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_retrieval_minimum_tax(self):
+        res = retrieve("minimum de perception chiffre d'affaires IS",
+                       framework="CGI-2025", k=1)
+        self.assertEqual(res[0]["slug"], "cgi-2025-is-minimum-tax")
+
+    def test_retrieval_depreciation_rates(self):
+        res = retrieve("taux amortissement materiel informatique mobilier",
+                       framework="CGI-2025", k=1)
+        self.assertEqual(res[0]["slug"], "cgi-2025-is-depreciation-rates")
+
+    def test_retrieval_scoped_to_cgi_not_syscohada(self):
+        # An IS query under the CGI framework must not surface SYSCOHADA rules.
+        res = retrieve("taux de l'impot sur les societes",
+                       framework="CGI-2025", k=3)
+        self.assertTrue(res)
+        for hit in res:
+            self.assertEqual(hit["framework"], "CGI-2025")
+
+
+class CGITotalsTests(TestCase):
+    """Cross-slice sanity for the CGI tax catalogue (K10 first; K11/K12 next)."""
+
+    def test_total_cgi_rules(self):
+        self.assertEqual(
+            Rule.objects.filter(framework="CGI-2025").count(), 30)
+
+    def test_cgi_slices_present(self):
+        slices = set(
+            Rule.objects.filter(framework="CGI-2025")
+            .values_list("knowledge_slice", flat=True)
+        )
+        self.assertEqual(slices, {"K10"})

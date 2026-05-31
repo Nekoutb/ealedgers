@@ -64,3 +64,4 @@ Desktop.ini
 # One-off reference exports (not part of the application)
 res_partner_fields.csv
 res_partner_fields.xlsx
+.tmp_pdf/

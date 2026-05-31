@@ -468,19 +468,75 @@ class K20LoaderTests(TestCase):
 
 
 class KnowledgeBaseTotalsTests(TestCase):
-    """Cross-slice sanity: the encoded SYSCOHADA base now spans K01+K15+K20."""
+    """Cross-slice sanity: the encoded SYSCOHADA base spans K01+K15+K20+K02."""
 
     def test_total_syscohada_rules(self):
-        # 12 (K01) + 15 (K15) + 12 (K20) = 39
+        # 12 (K01) + 15 (K15) + 12 (K20) + 8 (K02) = 47
         self.assertEqual(
-            Rule.objects.filter(framework="SYSCOHADA-2017").count(), 39)
+            Rule.objects.filter(framework="SYSCOHADA-2017").count(), 47)
 
-    def test_three_slices_present(self):
+    def test_four_slices_present(self):
         slices = set(
             Rule.objects.filter(framework="SYSCOHADA-2017")
             .values_list("knowledge_slice", flat=True)
         )
-        self.assertEqual(slices, {"K01", "K15", "K20"})
+        self.assertEqual(slices, {"K01", "K15", "K20", "K02"})
+
+
+# ---------------------------------------------------------------------------
+# Step 21 — K02 SYSCOHADA component-approach (approche par composants) slice
+# ---------------------------------------------------------------------------
+
+
+class K02LoaderTests(TestCase):
+    """K02 loads via migration 0007 and is retrievable."""
+
+    def test_k02_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K02",
+                                framework="SYSCOHADA-2017").count()
+        self.assertEqual(n, 8)
+
+    def test_key_component_rules_encoded(self):
+        for slug in ("syscohada-component-decomposition-principle",
+                     "syscohada-component-separate-depreciation",
+                     "syscohada-component-replacement-derecognition",
+                     "syscohada-component-major-revision",
+                     "syscohada-component-dismantling-asset"):
+            self.assertTrue(Rule.objects.filter(slug=slug).exists(),
+                            f"{slug} missing")
+
+    def test_decomposition_principle_effects(self):
+        r = Rule.objects.get(slug="syscohada-component-decomposition-principle")
+        self.assertEqual(
+            r.effects["structure_value"],
+            "cout_total_moins_valeur_des_composants",
+        )
+
+    def test_replacement_uses_account_81(self):
+        r = Rule.objects.get(slug="syscohada-component-replacement-derecognition")
+        self.assertEqual(r.effects["vnc_account"], "812")
+
+    def test_dismantling_provision_account(self):
+        r = Rule.objects.get(slug="syscohada-component-dismantling-asset")
+        self.assertEqual(r.effects["provision_account"], "1984")
+
+    def test_all_k02_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K02")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_all_k02_are_framework_scope(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K02")
+            .exclude(scope="framework").exists()
+        )
+
+    def test_retrieval_component_approach(self):
+        res = retrieve("approche par composants decomposition immobilisation structure",
+                       framework="SYSCOHADA-2017", k=1)
+        self.assertEqual(res[0]["slug"],
+                         "syscohada-component-decomposition-principle")
 
 
 # ---------------------------------------------------------------------------

@@ -1101,3 +1101,47 @@ class ProcedureValidationIntegrationTests(TestCase):
         })
         resp = self.client.get(reverse("knowledge:procedure_list"))
         self.assertContains(resp, "Conflicts with framework")
+
+
+# ---------------------------------------------------------------------------
+# Step 26 — retrieval-quality test set
+# ---------------------------------------------------------------------------
+
+
+class RetrievalQualityTests(TestCase):
+    """Precision of retrieve() against the 200-query labelled set. The full
+    105-rule catalogue is present (loaded by the knowledge migrations)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from knowledge.retrieval_eval import evaluate
+        cls.metrics = evaluate(k=5)
+
+    def test_dataset_covers_every_rule_with_valid_labels(self):
+        from knowledge.retrieval_eval import TEST_SET
+        covered = {e[1] for e in TEST_SET}
+        all_slugs = set(Rule.objects.values_list("slug", flat=True))
+        self.assertGreaterEqual(len(TEST_SET), 200)
+        self.assertEqual(covered - all_slugs, set(),
+                         "test set references slugs that don't exist")
+        self.assertEqual(all_slugs - covered, set(),
+                         "some rules have no query in the test set")
+
+    def test_french_recall_at_5_meets_target(self):
+        # Plan target: >= 85% top-5. French is the operative language — the
+        # corpus and the agents' queries are French.
+        fr = self.metrics["lang:fr"]
+        self.assertGreaterEqual(
+            fr["r_at_5"], 0.85,
+            f"French recall@5 below 85% target: {fr['r_at_5']:.1%}")
+
+    def test_overall_recall_at_5_regression_floor(self):
+        # Overall includes the English block (a known cross-lingual gap until
+        # pgvector); hold a conservative floor to catch regressions.
+        self.assertGreaterEqual(self.metrics["overall"]["r_at_5"], 0.80)
+
+    def test_metrics_expose_all_buckets(self):
+        for bucket in ("overall", "fw:CGI-2025", "fw:SYSCOHADA-2017",
+                       "lang:fr", "lang:en"):
+            self.assertIn(bucket, self.metrics)
+            self.assertIn("r_at_5", self.metrics[bucket])

@@ -6,6 +6,8 @@ from django.utils import timezone
 
 from .models import (
     Account,
+    AgentRun,
+    AgentToolCall,
     BankStatement,
     BankStatementLine,
     Company,
@@ -13,6 +15,8 @@ from .models import (
     CustomerInvoiceLine,
     Currency,
     DepreciationLine,
+    ERPConnection,
+    ERPOperation,
     FixedAsset,
     FxRate,
     Journal,
@@ -22,6 +26,7 @@ from .models import (
     Partner,
     Period,
     PeriodLock,
+    Provenance,
     SupplierBill,
     SupplierBillLine,
     Tenant,
@@ -802,3 +807,143 @@ class FxRateAdmin(admin.ModelAdmin):
     search_fields = ('source', 'notes')
     date_hierarchy = 'fixing_date'
     list_select_related = ('base_currency', 'quote_currency')
+
+
+# ---------------------------------------------------------------------------
+# Step 7 — Provenance / AgentRun / AgentToolCall / ERPConnection / ERPOperation
+# ---------------------------------------------------------------------------
+#
+# These are append-only audit/runtime tables. The admin treats them as
+# mostly read-only: humans can browse, can't add or delete (except for
+# ERPConnection, which IS a user-managed config record).
+
+
+class AgentToolCallInline(admin.TabularInline):
+    model = AgentToolCall
+    extra = 0
+    fields = ('sequence', 'tool', 'status', 'started_at', 'completed_at')
+    readonly_fields = ('sequence', 'tool', 'status', 'started_at', 'completed_at')
+    can_delete = False
+    show_change_link = True
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(AgentRun)
+class AgentRunAdmin(TenantAwareAdmin):
+    list_display = ('department', 'task', 'status', 'confidence', 'llm_model',
+                    'total_tokens', 'started_at', 'completed_at')
+    list_filter = ('department', 'status', 'llm_model')
+    search_fields = ('task', 'chain_id', 'error')
+    readonly_fields = ('department', 'task', 'chain_id', 'status', 'llm_model',
+                       'input_tokens', 'output_tokens', 'confidence',
+                       'input_summary', 'output_summary', 'error',
+                       'started_at', 'completed_at',
+                       'reviewed_by', 'reviewed_at')
+    fieldsets = (
+        (None, {'fields': ('department', 'task', 'chain_id', 'status', 'confidence')}),
+        ('Cost', {'fields': ('llm_model', 'input_tokens', 'output_tokens')}),
+        ('I/O', {'fields': ('input_summary', 'output_summary', 'error'),
+                 'classes': ('collapse',)}),
+        ('Audit', {'fields': ('started_at', 'completed_at',
+                              'reviewed_by', 'reviewed_at'),
+                   'classes': ('collapse',)}),
+    )
+    inlines = [AgentToolCallInline]
+    date_hierarchy = 'started_at'
+
+    def has_add_permission(self, request):
+        return False  # AgentRun rows are created by the agent runtime, not humans
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(AgentToolCall)
+class AgentToolCallAdmin(TenantAwareAdmin):
+    list_display = ('agent_run', 'sequence', 'tool', 'status',
+                    'started_at', 'completed_at')
+    list_filter = ('status', 'tool')
+    search_fields = ('tool', 'error', 'agent_run__task')
+    readonly_fields = ('tenant', 'agent_run', 'sequence', 'tool',
+                       'arguments', 'result', 'status', 'error',
+                       'started_at', 'completed_at')
+    list_select_related = ('agent_run',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ERPConnection)
+class ERPConnectionAdmin(TenantAwareAdmin):
+    """User-managed: tenants configure their own ERP connections here."""
+    list_display = ('name', 'vendor', 'version', 'health',
+                    'is_primary', 'is_active', 'last_healthcheck_at')
+    list_filter = ('vendor', 'health', 'is_active', 'is_primary')
+    search_fields = ('name', 'last_healthcheck_error')
+    readonly_fields = ('capabilities', 'health', 'last_healthcheck_at',
+                       'last_healthcheck_error', 'created_at', 'updated_at')
+    fieldsets = (
+        (None, {'fields': ('name', 'vendor', 'version', 'is_primary', 'is_active')}),
+        ('Routing', {'fields': ('config',),
+                     'description': 'URL, ports, db name, env-var names — '
+                                    'never put actual secrets here.'}),
+        ('Capabilities', {'fields': ('capabilities',),
+                          'description': 'Auto-populated by the connector at '
+                                         'each healthcheck.'}),
+        ('Health', {'fields': ('health', 'last_healthcheck_at',
+                               'last_healthcheck_error'),
+                    'classes': ('collapse',)}),
+        ('Audit', {'fields': ('created_at', 'updated_at'),
+                   'classes': ('collapse',)}),
+    )
+
+
+@admin.register(ERPOperation)
+class ERPOperationAdmin(TenantAwareAdmin):
+    list_display = ('capability', 'method', 'connection', 'status',
+                    'retry_count', 'started_at', 'completed_at')
+    list_filter = ('status', 'capability', 'connection')
+    search_fields = ('method', 'error', 'capability')
+    readonly_fields = ('tenant', 'connection', 'capability', 'method',
+                       'tool_call', 'journal_entry',
+                       'request', 'response', 'external_ids',
+                       'status', 'error', 'retry_count',
+                       'started_at', 'completed_at')
+    list_select_related = ('connection', 'journal_entry')
+    date_hierarchy = 'started_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Provenance)
+class ProvenanceAdmin(TenantAwareAdmin):
+    list_display = ('source', 'summary_short', 'chain_id',
+                    'journal_entry', 'approved_by', 'created_at')
+    list_filter = ('source',)
+    search_fields = ('summary', 'chain_id')
+    readonly_fields = ('tenant', 'journal_entry', 'source', 'chain_id',
+                       'summary', 'agent_run', 'approved_by', 'approved_at',
+                       'citations', 'extra', 'created_at')
+    list_select_related = ('journal_entry', 'agent_run', 'approved_by')
+    date_hierarchy = 'created_at'
+
+    @admin.display(description='Summary')
+    def summary_short(self, obj):
+        if not obj.summary:
+            return '(no summary)'
+        return obj.summary[:60] + ('…' if len(obj.summary) > 60 else '')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

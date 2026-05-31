@@ -1834,3 +1834,362 @@ class FxRate(models.Model):
                .order_by('-fixing_date')
                .first())
         return row.rate if row else None
+
+
+# ---------------------------------------------------------------------------
+# Step 7 — Provenance + AgentRun + AgentToolCall + ERPConnection + ERPOperation
+# ---------------------------------------------------------------------------
+#
+# v2 audit-trail + agent-runtime backbone. Every system-written
+# JournalEntry will eventually carry a Provenance row pointing at the
+# AgentRun that produced it, the tools that were called, the rules cited,
+# and (when the JE was pushed to a tenant ERP) the ERPOperation row that
+# captured the API call. All five tables are tenant-scoped and append-
+# only by convention — do not edit or delete provenance rows.
+
+
+# Department slugs match docs/EXECUTION_PLAN.md §1. Used by AgentRun.
+DEPARTMENT_CHOICES = [
+    ('D00', 'Controller'),
+    ('D01', 'AP — Accounts Payable'),
+    ('D02', 'AR — Accounts Receivable'),
+    ('D03', 'Treasury'),
+    ('D04', 'Fixed Assets'),
+    ('D05', 'GL — General Ledger'),
+    ('D06', 'Tax'),
+    ('D07', 'Payroll'),
+    ('D08', 'Inventory'),
+    ('D09', 'Reporting'),
+    ('D10', 'Cost Accounting'),
+    ('D11', 'FP&A'),
+    ('dispatcher', 'Dispatcher (routing)'),
+    ('system', 'System (non-departmental)'),
+]
+
+
+class AgentRun(models.Model):
+    """One end-to-end run of a department's agent stack on a piece of work.
+
+    Holds metadata: which department, what task, chain id (linking
+    related runs), timing, token usage, status, outputs, and the human
+    reviewer. The actual *what the agent did* sits in child
+    ``AgentToolCall`` rows.
+    """
+
+    STATUSES = [
+        ('pending', 'Pending'),
+        ('running', 'Running'),
+        ('proposed', 'Proposed — awaiting approval'),
+        ('approved', 'Approved'),
+        ('executed', 'Executed — action complete'),
+        ('rejected', 'Rejected by reviewer'),
+        ('failed', 'Failed'),
+        ('skipped', 'Skipped — kill switch or capacity cap'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='agent_runs',
+    )
+    department = models.CharField(max_length=16, choices=DEPARTMENT_CHOICES)
+    task = models.CharField(
+        max_length=128,
+        help_text='Short label of what this run did, e.g. "classify_vendor_bill"',
+    )
+    chain_id = models.CharField(max_length=64, blank=True, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUSES, default='pending')
+
+    # Cost tracking
+    llm_model = models.CharField(max_length=64, blank=True)
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+
+    # Final confidence of the proposed action (0..1) — drives auto-action gates.
+    confidence = models.DecimalField(
+        max_digits=4, decimal_places=3, null=True, blank=True,
+        help_text='0.000 → 1.000',
+    )
+
+    # JSON blobs — loose because each department's prompts differ.
+    input_summary = models.JSONField(default=dict, blank=True)
+    output_summary = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        null=True, blank=True, related_name='+',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['tenant', 'department', 'status']),
+            models.Index(fields=['tenant', 'chain_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.department}/{self.task} [{self.status}]'
+
+    @property
+    def duration_seconds(self):
+        if self.completed_at and self.started_at:
+            return (self.completed_at - self.started_at).total_seconds()
+        return None
+
+    @property
+    def total_tokens(self):
+        return (self.input_tokens or 0) + (self.output_tokens or 0)
+
+
+class AgentToolCall(models.Model):
+    """One tool invocation within an AgentRun.
+
+    Records the tool name, args, result, status, and timing. ``sequence``
+    preserves ordering within the run.
+    """
+
+    STATUSES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('error', 'Error'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='agent_tool_calls',
+    )
+    agent_run = models.ForeignKey(
+        AgentRun, on_delete=models.CASCADE, related_name='tool_calls',
+    )
+    sequence = models.IntegerField(default=0)
+
+    tool = models.CharField(
+        max_length=64,
+        help_text='Tool name, e.g. "erp.post_je", "knowledge.retrieve"',
+    )
+    arguments = models.JSONField(default=dict, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(max_length=16, choices=STATUSES, default='pending')
+    error = models.TextField(blank=True)
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['agent_run', 'sequence', 'started_at']
+
+    def __str__(self):
+        return f'{self.tool} ({self.status})'
+
+
+class ERPConnection(models.Model):
+    """A tenant's connection to a remote ERP system.
+
+    Holds vendor + URL + env-var names for credentials (never actual
+    secrets) + discovered capability matrix + health status.
+    """
+
+    VENDORS = [
+        ('odoo', 'Odoo'),
+        ('sage', 'Sage Saari'),
+        ('sap_b1', 'SAP Business One'),
+        ('dynamics_365_bc', 'Dynamics 365 Business Central'),
+        ('quickbooks', 'QuickBooks Online'),
+        ('manual', 'Manual / no ERP (standalone mode)'),
+    ]
+
+    HEALTH = [
+        ('ok', 'OK'),
+        ('degraded', 'Degraded'),
+        ('down', 'Down'),
+        ('unconfigured', 'Unconfigured'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='erp_connections',
+    )
+    name = models.CharField(
+        max_length=64, help_text='Human label, e.g. "Production Odoo"',
+    )
+    vendor = models.CharField(max_length=32, choices=VENDORS)
+    version = models.CharField(max_length=32, blank=True, help_text='e.g. "17.0"')
+
+    # Routing config. Secrets live in env vars named here; never store
+    # actual credentials in this row.
+    config = models.JSONField(
+        default=dict, blank=True,
+        help_text='URL, port, db name, env-var names referencing secrets.',
+    )
+
+    # List of CAP.NN slugs confirmed at last healthcheck.
+    capabilities = models.JSONField(default=list, blank=True)
+
+    health = models.CharField(max_length=16, choices=HEALTH, default='unconfigured')
+    last_healthcheck_at = models.DateTimeField(null=True, blank=True)
+    last_healthcheck_error = models.TextField(blank=True)
+
+    is_active = models.BooleanField(default=True)
+    is_primary = models.BooleanField(
+        default=False,
+        help_text='Primary connection when tenant has multiple ERPs',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-is_primary', 'name']
+
+    def __str__(self):
+        return f'{self.name} ({self.get_vendor_display()})'
+
+
+class ERPOperation(models.Model):
+    """A single API call made against a tenant's ERP.
+
+    Append-only audit trail of every capability invocation. Pairs with
+    ``AgentToolCall`` when triggered by the agent; pairs forward with
+    ``JournalEntry`` when the operation produced a local shadow row.
+
+    ``external_ids`` captures the IDs the ERP assigned, so we can do
+    round-trip reconciliation later.
+    """
+
+    STATUSES = [
+        ('pending', 'Pending'),
+        ('in_flight', 'In flight'),
+        ('success', 'Success'),
+        ('partial', 'Partial success'),
+        ('failed', 'Failed'),
+        ('rolled_back', 'Rolled back'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='erp_operations',
+    )
+    connection = models.ForeignKey(
+        ERPConnection, on_delete=models.PROTECT, related_name='operations',
+    )
+
+    capability = models.CharField(
+        max_length=16,
+        help_text='CAP.NN code from the capability registry, e.g. "CAP.03"',
+    )
+    method = models.CharField(
+        max_length=64, blank=True,
+        help_text='Vendor-specific endpoint, e.g. "account.move.create"',
+    )
+
+    # Optional links
+    tool_call = models.ForeignKey(
+        AgentToolCall, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='erp_operations',
+    )
+    journal_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='erp_operations',
+    )
+
+    request = models.JSONField(default=dict, blank=True)
+    response = models.JSONField(default=dict, blank=True)
+    external_ids = models.JSONField(
+        default=dict, blank=True,
+        help_text='IDs assigned by the remote ERP, e.g. {"move_id": 1234}',
+    )
+
+    status = models.CharField(max_length=16, choices=STATUSES, default='pending')
+    error = models.TextField(blank=True)
+    retry_count = models.IntegerField(default=0)
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['tenant', 'capability', 'status']),
+            models.Index(fields=['tenant', 'connection', '-started_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.capability} @ {self.connection.name} [{self.status}]'
+
+
+class Provenance(models.Model):
+    """The 'why' behind every system-written JournalEntry or other action.
+
+    When an agent (or any automated process) writes to the ledger, a
+    Provenance row captures the full causal chain: source classification
+    (manual / agent / imported / system / migration), the ``AgentRun``
+    that produced it, the human approver, the cited rules, and a
+    ``chain_id`` linking related entries.
+
+    The ``journal_entry`` FK is nullable because provenance also exists
+    for non-JE actions (ran depreciation, fetched TB, etc.).
+
+    Append-only — do not edit or delete. Auditors read this to answer
+    "why is this entry here?".
+    """
+
+    SOURCES = [
+        ('manual', 'Manual entry by human'),
+        ('agent', 'Agent-proposed action'),
+        ('imported', 'Imported (CSV / bank feed / OCR)'),
+        ('system', 'System-generated (depreciation, FX, accruals)'),
+        ('migration', 'Created by a data migration'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='provenance_records',
+    )
+    journal_entry = models.ForeignKey(
+        JournalEntry, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='provenance_records',
+    )
+
+    source = models.CharField(max_length=16, choices=SOURCES, default='manual')
+    chain_id = models.CharField(max_length=64, blank=True, db_index=True)
+    summary = models.CharField(max_length=512, blank=True)
+
+    agent_run = models.ForeignKey(
+        AgentRun, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='provenance_records',
+    )
+
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        null=True, blank=True, related_name='+',
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    # Rule citations — list of K-slugs / rule ids the agent cited.
+    citations = models.JSONField(default=list, blank=True)
+
+    # Catch-all for context the agent thought worth recording.
+    extra = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant', 'chain_id']),
+            models.Index(fields=['tenant', 'source']),
+        ]
+
+    def __str__(self):
+        snippet = self.summary[:40] + '…' if len(self.summary) > 40 else self.summary
+        return f'[{self.source}] {snippet or "(no summary)"}'

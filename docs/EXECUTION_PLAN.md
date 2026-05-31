@@ -373,6 +373,7 @@ unlock the next step.
 | 2026-05-31 | 3    | Cutover **scheduled** (owner picked Option B). Plan continues from Step 4 in the meantime.                    |
 | 2026-05-31 | 3    | cmapi-vs-ealedgers audit added at `docs/cmapi_vs_ealedgers_audit.md`. cmapi-mirror items folded in (later).   |
 | 2026-05-31 | 4    | ensure_admin command + post_migrate signal landed (R4 enforced).                                              |
+| 2026-05-31 | 6    | Period + PeriodLock + FxRate models landed. Migration 0009 also extends RLS to the two new tenant-scoped tables. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

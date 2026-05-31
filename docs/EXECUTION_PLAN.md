@@ -382,6 +382,7 @@ unlock the next step.
 | 2026-05-31 | 11   | Scaffolded 4 empty Django apps (knowledge, agents, ingest, connectors) + registered in INSTALLED_APPS. Smoke tests only; models land in later phases. |
 | 2026-05-31 | 10   | Step 10 progress digest delivered. SSH bundle (Steps 3 + 5 + 10) scheduled-pending; code-only steps continue. |
 | 2026-05-31 | 12   | Django-Q2 code/config portion landed (ORM broker, no Redis; django_q in INSTALLED_APPS; Q_CLUSTER settings; tables migrate on deploy). Worker systemd unit template added at scripts/ealedgers-worker.service — installed during the SSH bundle. GH-Actions worker-restart hook also deferred to the SSH bundle. |
+| 2026-05-31 | 13   | (Option A split) Crossed into Phase P02. knowledge app gets Rule + Citation + TenantProcedure models (migration 0001). RuleVector (pgvector) deferred to after the SSH bundle; retrieval (Step 14) will use FTS first, vector added on top. RLS on knowledge_tenantprocedure. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

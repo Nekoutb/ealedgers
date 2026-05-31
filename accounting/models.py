@@ -1616,3 +1616,221 @@ def parse_bank_csv(text, *, date_format='%Y-%m-%d'):
         except Exception as exc:
             out.append((None, f'row {reader.line_num}: {exc}'))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Step 6 — Period, PeriodLock, FxRate (v2 foundation)
+# ---------------------------------------------------------------------------
+
+
+class Period(models.Model):
+    """A fiscal accounting period for a tenant — typically a month.
+
+    The agent posts JEs scoped to an open period. The Controller (D00)
+    drives the close workflow:
+
+      ``open`` → ``in_progress`` (close started by D00) → ``closed`` (locked)
+
+    A closed period is **immutable** — no further posting allowed. Auditors
+    treat closed periods as the system's source of truth for that month.
+    """
+
+    STATES = [
+        ('open', 'Open'),
+        ('in_progress', 'Close in progress'),
+        ('closed', 'Closed'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='periods',
+    )
+    code = models.CharField(
+        max_length=16,
+        help_text="Period identifier — e.g. '2026-05' for May 2026, "
+                  "'FY2026-Q2' for the second quarter of fiscal year 2026.",
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+    state = models.CharField(max_length=16, choices=STATES, default='open')
+
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-end_date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'code'],
+                name='unique_period_code_per_tenant',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.code} ({self.start_date} → {self.end_date})'
+
+    def clean(self):
+        super().clean()
+        if self.end_date and self.start_date and self.end_date < self.start_date:
+            raise ValidationError('end_date must be >= start_date.')
+
+    @property
+    def is_closed(self):
+        return self.state == 'closed'
+
+    @property
+    def latest_lock_event(self):
+        return self.lock_events.order_by('-acted_at').first()
+
+    @transaction.atomic
+    def lock(self, *, user=None, reason=''):
+        """Lock the period — no further posting allowed. Idempotent."""
+        if self.state == 'closed':
+            return
+        self.state = 'closed'
+        self.closed_at = timezone.now()
+        self.save(update_fields=['state', 'closed_at', 'updated_at'])
+        PeriodLock.objects.create(
+            tenant=self.tenant,
+            period=self,
+            action='lock',
+            acted_by=user,
+            reason=reason,
+        )
+
+    @transaction.atomic
+    def unlock(self, *, user=None, reason=''):
+        """Re-open a previously-closed period. Audit-trail event recorded."""
+        if self.state == 'open':
+            return
+        self.state = 'open'
+        self.closed_at = None
+        self.save(update_fields=['state', 'closed_at', 'updated_at'])
+        PeriodLock.objects.create(
+            tenant=self.tenant,
+            period=self,
+            action='unlock',
+            acted_by=user,
+            reason=reason,
+        )
+
+    @transaction.atomic
+    def start_close(self, *, user=None):
+        """Move period to 'close in progress' — D00 Controller workflow."""
+        if self.state == 'closed':
+            raise ValidationError('Period already closed.')
+        self.state = 'in_progress'
+        self.save(update_fields=['state', 'updated_at'])
+
+
+class PeriodLock(models.Model):
+    """Audit log of period-lock and period-unlock events.
+
+    Separated from Period.state so we keep a full history of every lock /
+    unlock action — who, when, why. The current state of the period lives
+    on Period.state; this table is the diary.
+    """
+
+    ACTIONS = [
+        ('lock', 'Lock'),
+        ('unlock', 'Unlock'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='period_lock_events',
+    )
+    period = models.ForeignKey(
+        Period, on_delete=models.CASCADE, related_name='lock_events',
+    )
+    action = models.CharField(max_length=8, choices=ACTIONS)
+    acted_at = models.DateTimeField(auto_now_add=True)
+    acted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT, null=True, blank=True, related_name='+',
+    )
+    reason = models.TextField(blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-acted_at']
+
+    def __str__(self):
+        return (f'{self.get_action_display()} {self.period.code} '
+                f'by {self.acted_by_id or "system"} @ {self.acted_at}')
+
+
+class FxRate(models.Model):
+    """Time-series of foreign-exchange fixings.
+
+    **Global** — not tenant-scoped, because FX fixings (BCEAO, ECB, Bank
+    of Cameroon, etc.) are universal market data. If a specific tenant
+    ever needs to override a fixing for hedge-accounting reasons, that's
+    a separate concept (``TenantFxOverride``) we can add later.
+
+    Convention: ``rate`` = how many units of ``quote_currency`` per 1 unit
+    of ``base_currency``. So for an XAF book holding EUR, with the row
+    ``base=EUR quote=XAF rate=655.957 on 2026-05-30``, 1 EUR is worth
+    655.957 XAF on that date.
+    """
+
+    base_currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, related_name='fx_rates_as_base',
+    )
+    quote_currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, related_name='fx_rates_as_quote',
+    )
+    fixing_date = models.DateField(db_index=True)
+    rate = models.DecimalField(
+        max_digits=20, decimal_places=8,
+        help_text='Quote per 1 unit of base. E.g. base=EUR quote=XAF '
+                  '→ ~655.957 means 1 EUR = 655.957 XAF.',
+    )
+    source = models.CharField(
+        max_length=64, blank=True,
+        help_text="Origin of the fixing — 'BCEAO', 'ECB', 'manual', etc.",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-fixing_date', '-id']
+        indexes = [
+            models.Index(fields=['base_currency', 'quote_currency', '-fixing_date']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['base_currency', 'quote_currency', 'fixing_date'],
+                name='unique_fx_rate_per_pair_date',
+            ),
+        ]
+
+    def __str__(self):
+        return (f'{self.base_currency.code}/{self.quote_currency.code} '
+                f'@ {self.fixing_date} = {self.rate}')
+
+    def clean(self):
+        super().clean()
+        if self.base_currency_id and self.quote_currency_id and \
+                self.base_currency_id == self.quote_currency_id:
+            raise ValidationError(
+                'base_currency and quote_currency must be different.'
+            )
+        if self.rate is not None and self.rate <= 0:
+            raise ValidationError('rate must be positive.')
+
+    @classmethod
+    def get_rate(cls, base, quote, on_date):
+        """Return the latest rate on or before ``on_date`` for the pair,
+        or ``None`` if no fixing exists."""
+        if base.code == quote.code:
+            return Decimal('1')
+        row = (cls.objects
+               .filter(base_currency=base, quote_currency=quote,
+                       fixing_date__lte=on_date)
+               .order_by('-fixing_date')
+               .first())
+        return row.rate if row else None

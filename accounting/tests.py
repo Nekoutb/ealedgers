@@ -22,11 +22,14 @@ from accounting.models import (
     Currency,
     CustomerInvoice,
     CustomerInvoiceLine,
+    FxRate,
     Journal,
     JournalEntry,
     JournalEntryLine,
     Membership,
     Partner,
+    Period,
+    PeriodLock,
     SupplierBill,
     SupplierBillLine,
     parse_bank_csv,
@@ -1701,3 +1704,177 @@ class EnsureAdminCommandTests(TestCase):
         ]
         # If our handler is registered, it's referenced somewhere in receivers.
         self.assertIn(_run_ensure_admin, receivers)
+
+
+# ---------------------------------------------------------------------------
+# Step 6 — Period, PeriodLock, FxRate
+# ---------------------------------------------------------------------------
+
+
+class PeriodTests(TestCase):
+    """Period model + state machine + lock/unlock events."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_p", "a@a.test", "x")
+        cls.bob = User.objects.create_superuser("bob_p", "b@b.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("period-co", currency=cls.xaf, owner=cls.alice)
+        Membership.objects.create(user=cls.alice, tenant=cls.tenant, role="owner")
+
+    def _make_period(self, code="2026-05",
+                     start=date(2026, 5, 1), end=date(2026, 5, 31)):
+        return Period.objects.create(
+            tenant=self.tenant, code=code, start_date=start, end_date=end,
+        )
+
+    def test_create_period_default_state_is_open(self):
+        p = self._make_period()
+        self.assertEqual(p.state, "open")
+        self.assertFalse(p.is_closed)
+        self.assertIsNone(p.closed_at)
+
+    def test_end_before_start_raises(self):
+        from django.core.exceptions import ValidationError
+        p = Period(
+            tenant=self.tenant, code="bad",
+            start_date=date(2026, 5, 31), end_date=date(2026, 5, 1),
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_lock_transitions_state_and_records_event(self):
+        p = self._make_period()
+        p.lock(user=self.alice, reason="Month closed")
+        p.refresh_from_db()
+        self.assertEqual(p.state, "closed")
+        self.assertTrue(p.is_closed)
+        self.assertIsNotNone(p.closed_at)
+        ev = p.latest_lock_event
+        self.assertEqual(ev.action, "lock")
+        self.assertEqual(ev.acted_by, self.alice)
+        self.assertEqual(ev.reason, "Month closed")
+
+    def test_unlock_transitions_and_records_event(self):
+        p = self._make_period()
+        p.lock(user=self.alice, reason="oops")
+        p.unlock(user=self.bob, reason="reopen for late JE")
+        p.refresh_from_db()
+        self.assertEqual(p.state, "open")
+        self.assertIsNone(p.closed_at)
+        # Two events recorded: lock then unlock
+        events = list(p.lock_events.order_by("acted_at").values_list("action", flat=True))
+        self.assertEqual(events, ["lock", "unlock"])
+
+    def test_lock_is_idempotent(self):
+        p = self._make_period()
+        p.lock(user=self.alice)
+        p.lock(user=self.alice)  # second call should be a no-op
+        self.assertEqual(p.lock_events.count(), 1)
+
+    def test_unlock_idempotent_on_open(self):
+        p = self._make_period()
+        p.unlock(user=self.alice)
+        self.assertEqual(p.lock_events.count(), 0)
+
+    def test_start_close_blocks_on_closed_period(self):
+        from django.core.exceptions import ValidationError
+        p = self._make_period()
+        p.lock(user=self.alice)
+        with self.assertRaises(ValidationError):
+            p.start_close(user=self.alice)
+
+    def test_period_code_unique_within_tenant(self):
+        self._make_period()
+        with self.assertRaises(Exception):  # IntegrityError under SQLite
+            self._make_period()
+
+    def test_tenant_isolation_via_manager(self):
+        other_user = get_user_model().objects.create_user("ozzy", "o@o.test", "x")
+        other = _make_tenant("other-co", currency=self.xaf, owner=other_user)
+        self._make_period()  # belongs to self.tenant
+        Period.objects.create(
+            tenant=other, code="2026-05",
+            start_date=date(2026, 5, 1), end_date=date(2026, 5, 31),
+        )
+        self.assertEqual(Period.objects.for_tenant(self.tenant).count(), 1)
+        self.assertEqual(Period.objects.for_tenant(other).count(), 1)
+
+
+class FxRateTests(TestCase):
+    """Global FX time-series."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.eur = Currency.objects.create(code="EUR", name="Euro", decimal_places=2)
+        cls.usd = Currency.objects.create(code="USD", name="US Dollar", decimal_places=2)
+
+    def test_create_fixing(self):
+        rate = FxRate.objects.create(
+            base_currency=self.eur, quote_currency=self.xaf,
+            fixing_date=date(2026, 5, 30), rate=Decimal("655.957"),
+            source="BCEAO",
+        )
+        self.assertEqual(str(rate),
+                         f"EUR/XAF @ 2026-05-30 = 655.957")
+
+    def test_same_currency_pair_raises(self):
+        from django.core.exceptions import ValidationError
+        rate = FxRate(
+            base_currency=self.eur, quote_currency=self.eur,
+            fixing_date=date(2026, 5, 30), rate=Decimal("1"),
+        )
+        with self.assertRaises(ValidationError):
+            rate.full_clean()
+
+    def test_zero_or_negative_rate_raises(self):
+        from django.core.exceptions import ValidationError
+        rate = FxRate(
+            base_currency=self.eur, quote_currency=self.xaf,
+            fixing_date=date(2026, 5, 30), rate=Decimal("0"),
+        )
+        with self.assertRaises(ValidationError):
+            rate.full_clean()
+
+    def test_unique_constraint_pair_per_date(self):
+        FxRate.objects.create(
+            base_currency=self.eur, quote_currency=self.xaf,
+            fixing_date=date(2026, 5, 30), rate=Decimal("655.957"),
+        )
+        with self.assertRaises(Exception):  # IntegrityError
+            FxRate.objects.create(
+                base_currency=self.eur, quote_currency=self.xaf,
+                fixing_date=date(2026, 5, 30), rate=Decimal("656"),
+            )
+
+    def test_get_rate_returns_latest_on_or_before(self):
+        FxRate.objects.create(
+            base_currency=self.eur, quote_currency=self.xaf,
+            fixing_date=date(2026, 5, 28), rate=Decimal("655.5"),
+        )
+        FxRate.objects.create(
+            base_currency=self.eur, quote_currency=self.xaf,
+            fixing_date=date(2026, 5, 30), rate=Decimal("656.0"),
+        )
+        # On the later date → latest
+        self.assertEqual(
+            FxRate.get_rate(self.eur, self.xaf, date(2026, 5, 31)),
+            Decimal("656.0"),
+        )
+        # On an earlier date → the earlier fixing
+        self.assertEqual(
+            FxRate.get_rate(self.eur, self.xaf, date(2026, 5, 29)),
+            Decimal("655.5"),
+        )
+        # Before any fixing → None
+        self.assertIsNone(
+            FxRate.get_rate(self.eur, self.xaf, date(2026, 5, 1))
+        )
+
+    def test_get_rate_identity_for_same_currency(self):
+        self.assertEqual(
+            FxRate.get_rate(self.eur, self.eur, date(2026, 5, 30)),
+            Decimal("1"),
+        )

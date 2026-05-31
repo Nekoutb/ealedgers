@@ -14,11 +14,14 @@ from .models import (
     Currency,
     DepreciationLine,
     FixedAsset,
+    FxRate,
     Journal,
     JournalEntry,
     JournalEntryLine,
     Membership,
     Partner,
+    Period,
+    PeriodLock,
     SupplierBill,
     SupplierBillLine,
     Tenant,
@@ -711,3 +714,91 @@ class BankStatementLineAdmin(TenantAwareAdmin):
     list_filter = ('state', 'statement__journal')
     search_fields = ('description', 'reference')
     list_select_related = ('statement', 'matched_entry_line', 'generated_entry')
+
+
+# ---------------------------------------------------------------------------
+# Step 6 — Period / PeriodLock / FxRate
+# ---------------------------------------------------------------------------
+
+
+class PeriodLockInline(admin.TabularInline):
+    """Audit-log of lock/unlock events shown read-only under each Period."""
+    model = PeriodLock
+    extra = 0
+    fields = ('action', 'acted_at', 'acted_by', 'reason')
+    readonly_fields = ('action', 'acted_at', 'acted_by', 'reason')
+    can_delete = False
+    show_change_link = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Period)
+class PeriodAdmin(TenantAwareAdmin):
+    list_display = ('code', 'start_date', 'end_date', 'state', 'closed_at', 'updated_at')
+    list_filter = ('state',)
+    search_fields = ('code', 'notes')
+    readonly_fields = ('state', 'closed_at', 'created_at', 'updated_at')
+    fieldsets = (
+        (None, {'fields': ('code', 'start_date', 'end_date', 'state', 'notes')}),
+        ('Audit', {
+            'classes': ('collapse',),
+            'fields': ('closed_at', 'created_at', 'updated_at'),
+        }),
+    )
+    inlines = [PeriodLockInline]
+    actions = ['action_lock', 'action_unlock', 'action_start_close']
+
+    @admin.action(description='Lock selected periods (no more posting)')
+    def action_lock(self, request, queryset):
+        n = 0
+        for p in queryset:
+            p.lock(user=request.user, reason='Bulk lock from admin')
+            n += 1
+        self.message_user(request, f'Locked {n} period(s).', level=messages.SUCCESS)
+
+    @admin.action(description='Unlock selected periods')
+    def action_unlock(self, request, queryset):
+        n = 0
+        for p in queryset:
+            p.unlock(user=request.user, reason='Bulk unlock from admin')
+            n += 1
+        self.message_user(request, f'Unlocked {n} period(s).', level=messages.SUCCESS)
+
+    @admin.action(description='Mark selected periods as close-in-progress')
+    def action_start_close(self, request, queryset):
+        n = 0
+        for p in queryset:
+            try:
+                p.start_close(user=request.user)
+                n += 1
+            except Exception as exc:
+                self.message_user(request, f'{p}: {exc}', level=messages.ERROR)
+        self.message_user(request, f'Started close on {n} period(s).',
+                          level=messages.SUCCESS if n else messages.WARNING)
+
+
+@admin.register(PeriodLock)
+class PeriodLockAdmin(TenantAwareAdmin):
+    list_display = ('period', 'action', 'acted_at', 'acted_by', 'reason')
+    list_filter = ('action',)
+    search_fields = ('period__code', 'reason')
+    readonly_fields = ('period', 'action', 'acted_at', 'acted_by', 'reason')
+    list_select_related = ('period', 'acted_by')
+
+    def has_add_permission(self, request):
+        # PeriodLock rows are created only via Period.lock()/unlock(); never
+        # added manually.
+        return False
+
+
+@admin.register(FxRate)
+class FxRateAdmin(admin.ModelAdmin):
+    """Global FX time-series. Plain ModelAdmin, not TenantAwareAdmin, because
+    FxRate is intentionally not tenant-scoped (universal market data)."""
+    list_display = ('base_currency', 'quote_currency', 'fixing_date', 'rate', 'source')
+    list_filter = ('base_currency', 'quote_currency', 'source')
+    search_fields = ('source', 'notes')
+    date_hierarchy = 'fixing_date'
+    list_select_related = ('base_currency', 'quote_currency')

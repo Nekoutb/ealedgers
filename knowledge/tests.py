@@ -1,4 +1,4 @@
-"""Tests for the knowledge layer (Step 13)."""
+"""Tests for the knowledge layer (Steps 13–14)."""
 
 from datetime import date
 
@@ -6,8 +6,9 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
-from accounting.models import Currency, Tenant
+from accounting.models import Currency, Membership, Tenant
 from knowledge.models import Citation, Rule, TenantProcedure
+from knowledge.retrieval import retrieve, _tokenize
 
 
 class KnowledgeAppScaffoldTests(SimpleTestCase):
@@ -136,3 +137,165 @@ class TenantProcedureModelTests(TestCase):
         self.assertEqual(TenantProcedure.objects.for_tenant(self.beta).count(), 1)
         self.assertEqual(
             TenantProcedure.objects.for_tenant(self.acme).first().slug, "a")
+
+
+# ---------------------------------------------------------------------------
+# Step 14 — rule retrieval
+# ---------------------------------------------------------------------------
+
+
+class TokenizeTests(SimpleTestCase):
+    def test_drops_short_and_stopwords(self):
+        toks = _tokenize("The depreciation of vehicles and machinery")
+        self.assertNotIn("the", toks)
+        self.assertNotIn("and", toks)
+        self.assertNotIn("of", toks)  # len 2
+        self.assertIn("depreciation", toks)
+        self.assertIn("vehicles", toks)
+        self.assertIn("machinery", toks)
+
+    def test_keeps_accents_and_digits(self):
+        toks = _tokenize("Amortissement compte 2441 récupérable")
+        self.assertIn("amortissement", toks)
+        self.assertIn("2441", toks)
+        self.assertIn("récupérable", toks)
+
+
+class RetrieveTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_superuser("ret_admin", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.acme = Tenant.objects.create(slug="acme-ret", name="Acme Ret",
+                                         currency=cls.xaf, owner=cls.user)
+        Membership.objects.create(user=cls.user, tenant=cls.acme, role="owner")
+
+        # A small corpus of rules
+        cls.r_depr = Rule.objects.create(
+            slug="syscohada-depr-component", scope="framework",
+            framework="SYSCOHADA-2017", knowledge_slice="K02",
+            title="Fixed-asset depreciation by component",
+            source_ref="SYSCOHADA Titre VIII Ch.4",
+            source_text="Significant components of an asset are depreciated "
+                        "separately over their own useful lives.",
+            trigger_conditions={"transaction_type": "fixed_asset_acquisition"},
+            effects={"method": "component"},
+        )
+        cls.r_vat = Rule.objects.create(
+            slug="cgi-2025-tva-deductible", scope="tax_code",
+            framework="CGI-2025", knowledge_slice="K11",
+            title="VAT deductibility on purchases",
+            source_ref="CGI 2025 art. 144",
+            source_text="Input VAT on purchases is deductible when the supplier "
+                        "invoice is compliant.",
+            trigger_conditions={"transaction_type": "vendor_bill"},
+            effects={"vat": "recoverable"},
+        )
+        cls.r_wht = Rule.objects.create(
+            slug="cgi-2025-wht-services", scope="tax_code",
+            framework="CGI-2025", knowledge_slice="K12",
+            title="Withholding tax on services to non-residents",
+            source_ref="CGI 2025 art. 92",
+            source_text="Payments for services to non-residents bear "
+                        "withholding tax at source.",
+        )
+
+    def test_query_ranks_relevant_rule_first(self):
+        results = retrieve("depreciation of a vehicle component")
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0]["slug"], "syscohada-depr-component")
+
+    def test_query_returns_only_matching(self):
+        results = retrieve("withholding tax non-resident services")
+        slugs = [r["slug"] for r in results]
+        self.assertIn("cgi-2025-wht-services", slugs)
+        self.assertNotIn("syscohada-depr-component", slugs)
+
+    def test_framework_filter(self):
+        results = retrieve("tax", framework="CGI-2025")
+        self.assertTrue(all(r["framework"] == "CGI-2025" for r in results))
+
+    def test_scope_filter(self):
+        results = retrieve("", scope="framework")
+        self.assertTrue(all(r["kind"] == "rule" for r in results))
+        # blank query → filtered set returned (component rule is the only
+        # framework-scope rule)
+        slugs = [r["slug"] for r in results]
+        self.assertEqual(slugs, ["syscohada-depr-component"])
+
+    def test_knowledge_slice_filter(self):
+        results = retrieve("", knowledge_slice="K11")
+        self.assertEqual([r["slug"] for r in results], ["cgi-2025-tva-deductible"])
+
+    def test_k_limit(self):
+        results = retrieve("", k=2)
+        self.assertLessEqual(len(results), 2)
+
+    def test_inactive_rule_excluded(self):
+        self.r_wht.active = False
+        self.r_wht.save()
+        results = retrieve("withholding tax services")
+        self.assertNotIn("cgi-2025-wht-services", [r["slug"] for r in results])
+
+    def test_tenant_procedure_ranked_with_rules(self):
+        TenantProcedure.objects.create(
+            tenant=self.acme, slug="depr-vehicles-4y",
+            title="Vehicle depreciation over 4 years",
+            description="Vehicles depreciate straight-line over 48 months.",
+            trigger_conditions={"asset_class": "vehicles"},
+            effects={"useful_life_months": 48},
+        )
+        results = retrieve("vehicle depreciation", tenant=self.acme)
+        kinds = {r["kind"] for r in results}
+        self.assertIn("procedure", kinds)
+        # the procedure (title hit on both 'vehicle' + 'depreciation') should
+        # outrank or tie the framework component rule
+        self.assertEqual(results[0]["kind"], "procedure")
+
+    def test_procedures_excluded_without_tenant(self):
+        TenantProcedure.objects.create(
+            tenant=self.acme, slug="p1", title="vehicle depreciation thing",
+        )
+        results = retrieve("vehicle depreciation")  # no tenant
+        self.assertTrue(all(r["kind"] == "rule" for r in results))
+
+
+class RetrieveEndpointTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_superuser("ep_admin", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.acme = Tenant.objects.create(slug="acme-ep", name="Acme EP",
+                                         currency=cls.xaf, owner=cls.user)
+        Membership.objects.create(user=cls.user, tenant=cls.acme, role="owner")
+        Rule.objects.create(
+            slug="cgi-2025-tva-deductible", scope="tax_code",
+            framework="CGI-2025", knowledge_slice="K11",
+            title="VAT deductibility on purchases",
+            source_ref="CGI 2025 art. 144",
+            source_text="Input VAT on purchases is deductible.",
+        )
+
+    def test_endpoint_requires_login(self):
+        r = self.client.get("/knowledge/retrieve/?q=vat")
+        self.assertEqual(r.status_code, 302)  # bounced to login
+
+    def test_endpoint_returns_json_results(self):
+        self.client.force_login(self.user)
+        r = self.client.get("/knowledge/retrieve/?q=VAT deductible purchases")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(data["query"], "VAT deductible purchases")
+        self.assertGreaterEqual(data["count"], 1)
+        self.assertEqual(data["results"][0]["slug"], "cgi-2025-tva-deductible")
+
+    def test_endpoint_k_clamped(self):
+        self.client.force_login(self.user)
+        r = self.client.get("/knowledge/retrieve/?q=&k=999")
+        self.assertEqual(r.status_code, 200)
+        # no crash; k clamped to <= 50
+        self.assertLessEqual(len(r.json()["results"]), 50)

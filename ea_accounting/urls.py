@@ -25,6 +25,8 @@ urlpatterns = [
     path('workspace/', workspace, name='workspace'),
     # The Accounting module (custom views — dashboard + reports)
     path('accounting/', include('accounting.urls', namespace='accounting')),
+    # Knowledge layer (Step 14: retrieval API; Step 23: rule explorer UI)
+    path('knowledge/', include('knowledge.urls', namespace='knowledge')),
     # Django admin houses the CRUD UIs that the module nav links into
     path('admin/', admin.site.urls),
 ]

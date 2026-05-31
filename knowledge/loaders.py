@@ -22,6 +22,7 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 # Map slice id → fixture filename. Extend as slices are encoded (K02, …).
 SLICE_FIXTURES = {
     "K01": "k01_syscohada_coa.json",
+    "K15": "k15_syscohada_evaluation.json",
 }
 
 

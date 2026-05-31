@@ -373,3 +373,56 @@ class K01LoaderTests(TestCase):
         out = StringIO()
         call_command("load_knowledge", slice_id="K01", stdout=out)
         self.assertIn("complete", out.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# Step 16 — K15 SYSCOHADA evaluation & determination-of-result slice
+# ---------------------------------------------------------------------------
+
+
+class K15LoaderTests(TestCase):
+    """K15 loads via migration 0003 and is retrievable."""
+
+    def test_k15_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K15",
+                                framework="SYSCOHADA-2017").count()
+        self.assertEqual(n, 15)
+
+    def test_key_eval_rules_encoded(self):
+        for slug in ("syscohada-eval-base-conventions",
+                     "syscohada-eval-acquisition-cost-immobilisation",
+                     "syscohada-eval-depreciation",
+                     "syscohada-eval-impairment",
+                     "syscohada-eval-provisions",
+                     "syscohada-eval-inventory-fifo-or-wac"):
+            self.assertTrue(Rule.objects.filter(slug=slug).exists(),
+                            f"{slug} missing")
+
+    def test_base_conventions_effects(self):
+        r = Rule.objects.get(slug="syscohada-eval-base-conventions")
+        self.assertEqual(
+            r.effects["conventions"],
+            ["historical_cost", "prudence", "going_concern"],
+        )
+
+    def test_depreciation_forbids_revenue_based(self):
+        r = Rule.objects.get(slug="syscohada-eval-depreciation")
+        self.assertTrue(r.effects["revenue_based_forbidden"])
+        self.assertTrue(r.effects["mandatory_even_without_profit"])
+
+    def test_all_k15_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K15")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_retrieval_acquisition_cost(self):
+        res = retrieve("cout acquisition immobilisation droits enregistrement",
+                       framework="SYSCOHADA-2017", k=1)
+        self.assertEqual(res[0]["slug"],
+                         "syscohada-eval-acquisition-cost-immobilisation")
+
+    def test_retrieval_provisions(self):
+        res = retrieve("provision risques et charges retraite",
+                       framework="SYSCOHADA-2017", k=1)
+        self.assertEqual(res[0]["slug"], "syscohada-eval-provisions")

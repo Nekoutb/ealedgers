@@ -39,6 +39,7 @@ from accounting.models import (
     SupplierBillLine,
     parse_bank_csv,
     Tenant,
+    TenantDepartmentSubscription,
 )
 
 
@@ -2122,3 +2123,116 @@ class ProvenanceTests(TestCase):
                  .values_list("summary", flat=True)),
             ["OTHER-OWN"],
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 8 — Tenant.accounting_framework / agent_enabled / dept subscriptions
+# ---------------------------------------------------------------------------
+
+
+class TenantV2FieldsTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_t8", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("t8-co", currency=cls.xaf, owner=cls.alice)
+
+    def test_default_framework_is_syscohada(self):
+        self.assertEqual(self.tenant.accounting_framework, "SYSCOHADA-2017")
+
+    def test_agent_disabled_by_default(self):
+        # Safety: agents must be opt-in, never auto-acting until the tenant
+        # explicitly enables.
+        self.assertFalse(self.tenant.agent_enabled)
+
+    def test_framework_can_be_switched(self):
+        self.tenant.accounting_framework = "IFRS"
+        self.tenant.save()
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.accounting_framework, "IFRS")
+
+
+class TenantDepartmentSubscriptionTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_sub", "a@a.test", "x")
+        cls.clerk = User.objects.create_user("ap_clerk", "ap@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("sub-co", currency=cls.xaf, owner=cls.alice)
+        cls.other = _make_tenant("other-sub", currency=cls.xaf, owner=cls.alice)
+
+    def test_subscribe_single_department(self):
+        # "I only want an AP accountant"
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D01",
+        )
+        self.assertEqual(self.tenant.subscribed_departments(), ["D01"])
+        self.assertTrue(self.tenant.is_subscribed("D01"))
+        self.assertFalse(self.tenant.is_subscribed("D02"))
+
+    def test_subscribe_multiple_departments(self):
+        for code in ("D01", "D02", "D06"):
+            TenantDepartmentSubscription.objects.create(
+                tenant=self.tenant, department=code,
+            )
+        self.assertEqual(
+            sorted(self.tenant.subscribed_departments()),
+            ["D01", "D02", "D06"],
+        )
+
+    def test_inactive_subscription_excluded(self):
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D01", active=True,
+        )
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D02", active=False,
+        )
+        self.assertEqual(self.tenant.subscribed_departments(), ["D01"])
+        self.assertFalse(self.tenant.is_subscribed("D02"))
+
+    def test_unique_subscription_per_tenant_department(self):
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D01",
+        )
+        with self.assertRaises(Exception):  # IntegrityError
+            TenantDepartmentSubscription.objects.create(
+                tenant=self.tenant, department="D01",
+            )
+
+    def test_same_department_different_tenants_allowed(self):
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D01",
+        )
+        # Different tenant, same dept — must be allowed
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.other, department="D01",
+        )
+        self.assertTrue(self.tenant.is_subscribed("D01"))
+        self.assertTrue(self.other.is_subscribed("D01"))
+
+    def test_default_approver_per_department(self):
+        sub = TenantDepartmentSubscription.objects.create(
+            tenant=self.tenant, department="D01", default_approver=self.clerk,
+        )
+        self.assertEqual(sub.default_approver, self.clerk)
+
+    def test_per_tenant_flexibility_two_tenants_different_depts(self):
+        # tenant subscribes to AP only; other subscribes to AR only
+        TenantDepartmentSubscription.objects.create(tenant=self.tenant, department="D01")
+        TenantDepartmentSubscription.objects.create(tenant=self.other, department="D02")
+        self.assertEqual(self.tenant.subscribed_departments(), ["D01"])
+        self.assertEqual(self.other.subscribed_departments(), ["D02"])
+        self.assertFalse(self.tenant.is_subscribed("D02"))
+        self.assertFalse(self.other.is_subscribed("D01"))
+
+    def test_tenant_isolation_via_manager(self):
+        TenantDepartmentSubscription.objects.create(tenant=self.tenant, department="D01")
+        TenantDepartmentSubscription.objects.create(tenant=self.other, department="D02")
+        self.assertEqual(
+            TenantDepartmentSubscription.objects.for_tenant(self.tenant).count(), 1)
+        self.assertEqual(
+            TenantDepartmentSubscription.objects.for_tenant(self.other).count(), 1)

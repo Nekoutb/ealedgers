@@ -30,6 +30,7 @@ from .models import (
     SupplierBill,
     SupplierBillLine,
     Tenant,
+    TenantDepartmentSubscription,
 )
 
 
@@ -141,21 +142,42 @@ class MembershipInline(admin.TabularInline):
     readonly_fields = ("created_at",)
 
 
+class TenantDepartmentSubscriptionInline(admin.TabularInline):
+    """Per-tenant department staffing, editable right on the Tenant page.
+    Tick the departments this tenant wants (AP only, AR only, or all)."""
+    model = TenantDepartmentSubscription
+    extra = 0
+    autocomplete_fields = ("default_approver",)
+    fields = ("department", "active", "default_approver", "auto_action_cap")
+
+
 @admin.register(Tenant)
 class TenantAdmin(admin.ModelAdmin):
-    list_display = ("slug", "name", "country", "business_type", "currency", "plan", "owner", "active")
-    list_filter = ("business_type", "plan", "active", "country")
+    list_display = ("slug", "name", "country", "business_type", "currency",
+                    "plan", "accounting_framework", "agent_enabled",
+                    "subscribed_dept_count", "owner", "active")
+    list_filter = ("business_type", "plan", "accounting_framework",
+                   "agent_enabled", "active", "country")
     search_fields = ("slug", "name", "legal_name", "tax_id", "company_registry")
     readonly_fields = ("created_at", "updated_at")
     autocomplete_fields = ("owner", "currency")
-    inlines = [MembershipInline]
+    inlines = [MembershipInline, TenantDepartmentSubscriptionInline]
     fieldsets = (
         (None, {"fields": ("slug", "name", "legal_name", "business_type", "plan", "active")}),
-        ("Locale & accounting", {"fields": ("country", "currency", "fiscal_year_start_month")}),
+        ("Locale & accounting", {"fields": ("country", "currency",
+                                            "fiscal_year_start_month",
+                                            "accounting_framework")}),
+        ("Agent", {"fields": ("agent_enabled",),
+                   "description": "Master kill switch. When off, no department "
+                                  "agent auto-acts for this tenant."}),
         ("Identification", {"fields": ("tax_id", "company_registry")}),
         ("Ownership", {"fields": ("owner",)}),
         ("Audit", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
+
+    @admin.display(description="Depts")
+    def subscribed_dept_count(self, obj):
+        return obj.department_subscriptions.filter(active=True).count()
 
 
 @admin.register(Membership)
@@ -165,6 +187,16 @@ class MembershipAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "tenant__slug", "tenant__name")
     autocomplete_fields = ("user", "tenant")
     readonly_fields = ("created_at",)
+
+
+@admin.register(TenantDepartmentSubscription)
+class TenantDepartmentSubscriptionAdmin(TenantAwareAdmin):
+    list_display = ("tenant", "department", "active", "default_approver",
+                    "auto_action_cap", "updated_at")
+    list_filter = ("department", "active")
+    search_fields = ("tenant__name", "tenant__slug")
+    autocomplete_fields = ("default_approver",)
+    list_select_related = ("tenant", "default_approver")
 
 
 # ---------------------------------------------------------------------------

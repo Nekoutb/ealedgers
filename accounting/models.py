@@ -22,6 +22,40 @@ from accounting.managers import TenantManager
 
 
 # ---------------------------------------------------------------------------
+# Shared constants
+# ---------------------------------------------------------------------------
+
+# Department slugs match docs/EXECUTION_PLAN.md §1. Shared by AgentRun
+# (agent runtime) and TenantDepartmentSubscription (per-tenant staffing).
+# The "real" accounting departments a tenant can subscribe to are D00–D11;
+# 'dispatcher' and 'system' are internal pseudo-departments used only by
+# AgentRun and are not separately subscribable.
+DEPARTMENT_CHOICES = [
+    ('D00', 'Controller'),
+    ('D01', 'AP — Accounts Payable'),
+    ('D02', 'AR — Accounts Receivable'),
+    ('D03', 'Treasury'),
+    ('D04', 'Fixed Assets'),
+    ('D05', 'GL — General Ledger'),
+    ('D06', 'Tax'),
+    ('D07', 'Payroll'),
+    ('D08', 'Inventory'),
+    ('D09', 'Reporting'),
+    ('D10', 'Cost Accounting'),
+    ('D11', 'FP&A'),
+    ('dispatcher', 'Dispatcher (routing)'),
+    ('system', 'System (non-departmental)'),
+]
+
+# The subset of DEPARTMENT_CHOICES a tenant can actually subscribe to —
+# the 12 real departments (D00–D11), excluding the internal pseudo-depts.
+SUBSCRIBABLE_DEPARTMENTS = [
+    (code, label) for code, label in DEPARTMENT_CHOICES
+    if code.startswith('D')
+]
+
+
+# ---------------------------------------------------------------------------
 # Tenancy
 # ---------------------------------------------------------------------------
 
@@ -45,6 +79,15 @@ class Tenant(models.Model):
         ("pro", "Pro"),
         ("enterprise", "Enterprise"),
     ]
+    # Accounting frameworks the platform can apply. SYSCOHADA is the v1
+    # default; the field exists from Step 8 so the knowledge layer (Step 13+)
+    # can key rules by framework and onboard others (IFRS, etc.) without a
+    # schema change.
+    ACCOUNTING_FRAMEWORKS = [
+        ("SYSCOHADA-2017", "SYSCOHADA Révisé (2017)"),
+        ("IFRS", "IFRS"),
+        ("OTHER", "Other / custom"),
+    ]
 
     slug = models.SlugField(max_length=64, unique=True, help_text="URL-safe identifier; becomes subdomain")
     name = models.CharField(max_length=128)
@@ -59,6 +102,21 @@ class Tenant(models.Model):
     tax_id = models.CharField(max_length=32, blank=True, verbose_name="Tax ID / NIU")
     company_registry = models.CharField(max_length=64, blank=True, verbose_name="RCCM")
     plan = models.CharField(max_length=16, choices=PLANS, default="free")
+
+    # --- v2 fields (Step 8) -------------------------------------------------
+    accounting_framework = models.CharField(
+        max_length=32, choices=ACCOUNTING_FRAMEWORKS, default="SYSCOHADA-2017",
+        help_text="Which accounting framework's rules the agent applies for "
+                  "this tenant. Drives knowledge-layer rule selection.",
+    )
+    agent_enabled = models.BooleanField(
+        default=False,
+        help_text="Master kill switch (R-safety). When off, no department "
+                  "agent takes any automated action for this tenant — work "
+                  "still queues but nothing auto-executes. Off by default; a "
+                  "tenant explicitly opts in.",
+    )
+
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
         related_name="owned_tenants",
@@ -73,6 +131,25 @@ class Tenant(models.Model):
 
     def __str__(self):
         return self.name
+
+    # --- department subscriptions ------------------------------------------
+
+    def subscribed_departments(self):
+        """List of department codes this tenant has an ACTIVE subscription
+        to. Empty list = the tenant has subscribed to no departments yet."""
+        return list(
+            self.department_subscriptions
+            .filter(active=True)
+            .values_list("department", flat=True)
+        )
+
+    def is_subscribed(self, department_code):
+        """True if the tenant has an active subscription to the given
+        department (e.g. 'D01'). The agent runtime checks this before doing
+        any work in that department for the tenant."""
+        return self.department_subscriptions.filter(
+            department=department_code, active=True,
+        ).exists()
 
 
 class Membership(models.Model):
@@ -100,6 +177,66 @@ class Membership(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.tenant} ({self.get_role_display()})"
+
+
+class TenantDepartmentSubscription(models.Model):
+    """Which virtual-finance departments a tenant has activated.
+
+    This is the per-tenant staffing flexibility: one tenant can subscribe
+    to just D01 (AP) — "I only want an AP accountant"; another to just D02
+    (AR); another to all twelve. Each row activates one department for one
+    tenant. The agent runtime checks ``Tenant.is_subscribed(code)`` before
+    doing any work in that department.
+
+    ``default_approver`` lets bigger tenants route each department's
+    approval queue to a different human (an AP clerk reviews AP work, the
+    controller reviews GL work). Small tenants leave it null and a single
+    person approves everything.
+
+    Per-department capacity overrides (``auto_action_cap`` etc.) are stored
+    here too so plan tiers can be enforced per department (Step 46).
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="department_subscriptions",
+    )
+    department = models.CharField(max_length=8, choices=SUBSCRIBABLE_DEPARTMENTS)
+    active = models.BooleanField(default=True)
+
+    # Per-department human approver (optional). Null → tenant's single
+    # default approver handles this department too.
+    default_approver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="approver_for_departments",
+        help_text="Human who reviews this department's approval queue. "
+                  "Leave blank to use the tenant's default approver.",
+    )
+
+    # Per-department auto-action ceiling in the tenant's currency. 0 = never
+    # auto-act (always queue for human). Used by the capacity engine (Step 46).
+    auto_action_cap = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal("0"),
+        help_text="Max amount the agent may auto-post in this department "
+                  "without human approval. 0 = always require approval.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ["tenant", "department"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "department"],
+                name="unique_department_subscription_per_tenant",
+            ),
+        ]
+
+    def __str__(self):
+        state = "active" if self.active else "inactive"
+        return f"{self.tenant} → {self.get_department_display()} ({state})"
 
 
 # ---------------------------------------------------------------------------
@@ -1848,23 +1985,8 @@ class FxRate(models.Model):
 # only by convention — do not edit or delete provenance rows.
 
 
-# Department slugs match docs/EXECUTION_PLAN.md §1. Used by AgentRun.
-DEPARTMENT_CHOICES = [
-    ('D00', 'Controller'),
-    ('D01', 'AP — Accounts Payable'),
-    ('D02', 'AR — Accounts Receivable'),
-    ('D03', 'Treasury'),
-    ('D04', 'Fixed Assets'),
-    ('D05', 'GL — General Ledger'),
-    ('D06', 'Tax'),
-    ('D07', 'Payroll'),
-    ('D08', 'Inventory'),
-    ('D09', 'Reporting'),
-    ('D10', 'Cost Accounting'),
-    ('D11', 'FP&A'),
-    ('dispatcher', 'Dispatcher (routing)'),
-    ('system', 'System (non-departmental)'),
-]
+# (DEPARTMENT_CHOICES moved to the top of the module in Step 8 so both the
+#  Tenancy section and the agent-runtime models can share one definition.)
 
 
 class AgentRun(models.Model):

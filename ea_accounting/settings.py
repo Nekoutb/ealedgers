@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',  # provides {% load humanize %} (intcomma, etc.)
+    'django_q',  # background task queue (Step 12) — ORM broker, no Redis
 ]
 
 MIDDLEWARE = [
@@ -139,6 +140,29 @@ else:
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
 ]
+
+# --- Background tasks (Step 12) --------------------------------------------
+#
+# Django-Q2 with the Django ORM as the broker — no Redis, no extra service
+# beyond the qcluster worker process (run as a systemd unit on the server;
+# that unit + the GH-Actions restart hook are part of the SSH bundle, Steps
+# 3+5+10). The ORM broker uses whatever DATABASES['default'] is, so it works
+# on SQLite in dev and Postgres in prod.
+#
+# Until the qcluster worker runs, async_task() calls simply enqueue rows in
+# the django_q_ormq table and wait — harmless, since nothing enqueues tasks
+# until later phases.
+Q_CLUSTER = {
+    'name': 'ealedgers',
+    'orm': 'default',            # use the Django ORM broker (no Redis)
+    'workers': int(os.environ.get('Q_WORKERS', '2')),
+    'timeout': 600,              # a single task may run up to 10 min
+    'retry': 900,                # re-queue if not acked within 15 min (> timeout)
+    'max_attempts': 3,
+    'save_limit': 500,           # keep the last 500 successful task records
+    'catch_up': False,           # don't replay missed scheduled tasks after downtime
+    'label': 'Background Tasks',
+}
 
 # --- Locale ----------------------------------------------------------------
 

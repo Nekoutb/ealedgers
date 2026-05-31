@@ -2337,3 +2337,35 @@ class BackfillProvenanceTests(TestCase):
         self.mig.remove_backfilled_provenance(self.apps, None)
         self.assertEqual(Provenance.objects.count(), 1)
         self.assertTrue(Provenance.objects.filter(id=keeper.id).exists())
+
+
+# ---------------------------------------------------------------------------
+# Step 12 — Django-Q2 background task queue (code/config portion)
+# ---------------------------------------------------------------------------
+
+
+class DjangoQConfigTests(TestCase):
+    """The Django-Q2 queue is installed and configured with the ORM broker
+    (no Redis). The qcluster worker process itself runs as a systemd unit
+    on the server (SSH bundle) — these tests cover the code/config only."""
+
+    def test_django_q_installed(self):
+        from django.apps import apps
+        self.assertTrue(apps.is_installed('django_q'))
+
+    def test_q_cluster_uses_orm_broker(self):
+        from django.conf import settings
+        self.assertEqual(settings.Q_CLUSTER['orm'], 'default')
+        self.assertEqual(settings.Q_CLUSTER['name'], 'ealedgers')
+
+    def test_broker_constructs_with_orm_backend(self):
+        from django_q.brokers import get_broker
+        broker = get_broker()
+        self.assertEqual(type(broker).__name__, 'ORM')
+        self.assertEqual(broker.queue_size(), 0)
+
+    def test_queue_tables_exist(self):
+        from django_q.models import OrmQ, Task, Schedule
+        self.assertEqual(OrmQ.objects.count(), 0)
+        self.assertEqual(Task.objects.count(), 0)
+        self.assertEqual(Schedule.objects.count(), 0)

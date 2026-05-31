@@ -6,3 +6,8 @@ gunicorn>=22.0
 # the binary wheel ships its own libpq. Optional: if DATABASE_URL is not set,
 # the app continues to run on SQLite (unchanged dev behaviour).
 psycopg[binary]>=3.1
+# Background task queue (Step 12). Uses the Django ORM as its broker (the
+# existing DB — no Redis), so it works on SQLite in dev and Postgres in prod.
+# The qcluster worker process is run as a systemd unit on the server (part
+# of the SSH bundle: Steps 3+5+10); until then tasks simply queue.
+django-q2>=1.7

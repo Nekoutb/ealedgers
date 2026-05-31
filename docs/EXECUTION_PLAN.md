@@ -381,14 +381,28 @@ unlock the next step.
 | 2026-05-31 | 9    | Step 9 verified on prod as a no-op: production Elite Advisors has 0 journal entries (chart + journals seeded, no JEs posted), so 0 provenance created. Correct (provenance count = JE count = 0). |
 | 2026-05-31 | 11   | Scaffolded 4 empty Django apps (knowledge, agents, ingest, connectors) + registered in INSTALLED_APPS. Smoke tests only; models land in later phases. |
 | 2026-05-31 | 10   | Step 10 progress digest delivered. SSH bundle (Steps 3 + 5 + 10) scheduled-pending; code-only steps continue. |
+| 2026-05-31 | 12   | Django-Q2 code/config portion landed (ORM broker, no Redis; django_q in INSTALLED_APPS; Q_CLUSTER settings; tables migrate on deploy). Worker systemd unit template added at scripts/ealedgers-worker.service — installed during the SSH bundle. GH-Actions worker-restart hook also deferred to the SSH bundle. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.
 
-### Step 3 scheduling notes (added 2026-05-31)
+### SSH bundle scheduling notes (added 2026-05-31)
 
-- **Status:** pending scheduled window.
-- **Runbook:** `docs/postgres-cutover.md`.
-- **Pre-cutover prep already done:** PR #21 landed (Postgres-aware settings, RLS migration `0008`, psycopg dep).
-- **Steps unblocked by Step 3:** Step 5 (pgvector), Step 10 (vhost — also needs SSH).
-- **Steps that proceed in the meantime:** 4 (done), 6, 7, 8, 9, 11, 12 (code-only parts).
+One supervised ~30-min SSH session on the Vultr box will land all the
+infra-gated work at once. **Status: pending scheduled window.**
+
+What the session does, in order:
+1. **Step 3 — Postgres cutover.** Runbook: `docs/postgres-cutover.md`.
+   (Pre-cutover prep already merged: PR #21 — PG-aware settings, RLS
+   migration `0008`, psycopg dep.)
+2. **Step 5 — pgvector.** `CREATE EXTENSION vector;` + the VectorField
+   wiring (needs Postgres live first).
+3. **Step 10 — `app.ealedgers.com` vhost** + gunicorn unit + SSL cert.
+4. **Step 12 infra tail** — install `scripts/ealedgers-worker.service`,
+   `systemctl enable --now ealedgers-worker`, then add the
+   `systemctl restart ealedgers-worker.service` line to
+   `.github/workflows/deploy.yml`.
+
+**Steps already done as code-only, no SSH needed:** 1, 2, 4, 6, 7, 8, 9,
+11, 12 (code/config). After the SSH bundle, Phase P01 is fully complete
+and we cross into P02 (knowledge backbone, Step 13).

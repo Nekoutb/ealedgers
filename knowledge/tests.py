@@ -426,3 +426,58 @@ class K15LoaderTests(TestCase):
         res = retrieve("provision risques et charges retraite",
                        framework="SYSCOHADA-2017", k=1)
         self.assertEqual(res[0]["slug"], "syscohada-eval-provisions")
+
+
+# ---------------------------------------------------------------------------
+# Step 17 — K20 SYSCOHADA first-application (transition) slice
+# ---------------------------------------------------------------------------
+
+
+class K20LoaderTests(TestCase):
+    """K20 loads via migration 0004 and is retrievable."""
+
+    def test_k20_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K20",
+                                framework="SYSCOHADA-2017").count()
+        self.assertEqual(n, 12)
+
+    def test_compte_475_rule_encoded(self):
+        r = Rule.objects.get(slug="syscohada-fta-account-475-transitional")
+        self.assertEqual(r.effects["account"], "475")
+        self.assertEqual(r.effects["sub_accounts"], {"4751": "asset", "4752": "liability"})
+
+    def test_change_of_method_retrospective(self):
+        r = Rule.objects.get(slug="syscohada-fta-change-of-method-retrospective")
+        self.assertEqual(r.effects["basis"], "retrospective")
+        self.assertEqual(r.effects["opening_impact_to"], "report_a_nouveau")
+
+    def test_leases_prospective(self):
+        r = Rule.objects.get(slug="syscohada-fta-leases-prospective")
+        self.assertEqual(r.effects["existing_contracts"], "no_retreatment")
+
+    def test_all_k20_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K20")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_retrieval_compte_475(self):
+        res = retrieve("compte transitoire 475 retraitement revision",
+                       framework="SYSCOHADA-2017", k=1)
+        self.assertEqual(res[0]["slug"], "syscohada-fta-account-475-transitional")
+
+
+class KnowledgeBaseTotalsTests(TestCase):
+    """Cross-slice sanity: the encoded SYSCOHADA base now spans K01+K15+K20."""
+
+    def test_total_syscohada_rules(self):
+        # 12 (K01) + 15 (K15) + 12 (K20) = 39
+        self.assertEqual(
+            Rule.objects.filter(framework="SYSCOHADA-2017").count(), 39)
+
+    def test_three_slices_present(self):
+        slices = set(
+            Rule.objects.filter(framework="SYSCOHADA-2017")
+            .values_list("knowledge_slice", flat=True)
+        )
+        self.assertEqual(slices, {"K01", "K15", "K20"})

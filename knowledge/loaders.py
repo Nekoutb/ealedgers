@@ -23,6 +23,7 @@ FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 SLICE_FIXTURES = {
     "K01": "k01_syscohada_coa.json",
     "K15": "k15_syscohada_evaluation.json",
+    "K20": "k20_syscohada_first_application.json",
 }
 
 

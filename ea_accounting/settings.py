@@ -40,6 +40,12 @@ INSTALLED_APPS = [
     # `accounting` MUST come before `django.contrib.admin` so our
     # accounting/templates/admin/base_site.html override wins over Django's default.
     'accounting',
+    # v2 apps (Step 11 scaffold — empty until later phases populate them).
+    # L3 knowledge, L4 agents, L2 ingest, L6 connectors (see EXECUTION_PLAN §2).
+    'knowledge',
+    'agents',
+    'ingest',
+    'connectors',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

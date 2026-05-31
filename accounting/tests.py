@@ -1598,3 +1598,106 @@ class BankStatementTenantIsolationTests(TestCase):
         r = self.client.get("/accounting/bank/")
         self.assertEqual(len(r.context["statements"]), 1)
         self.assertEqual(r.context["statements"][0].tenant, self.acme)
+
+
+# ---------------------------------------------------------------------------
+# Step 4 — ensure_admin management command (R4)
+# ---------------------------------------------------------------------------
+
+
+class EnsureAdminCommandTests(TestCase):
+    """The `ensure_admin` management command must keep R4 honest:
+    `admin / admin` always exists, idempotently, on every environment.
+
+    Note: the ``post_migrate`` signal in ``accounting.apps`` already runs
+    this command during test-DB setup, so an ``admin`` user is present
+    before any test method runs. Each test starts by clearing it so we
+    can validate the command in isolation."""
+
+    def setUp(self):
+        # Clean slate per test — kill the admin the post_migrate signal
+        # planted, so each test method exercises the command from a known
+        # starting state.
+        get_user_model().objects.filter(username__in=('admin', 'root')).delete()
+
+    def _run(self, **env_overrides):
+        """Invoke the command with optional env-var overrides; return user."""
+        from django.core.management import call_command
+        import os
+        # Capture and restore env so tests don't bleed
+        keys = ('EA_ADMIN_USERNAME', 'EA_ADMIN_PASSWORD', 'EA_ADMIN_EMAIL',
+                'EA_ADMIN_SKIP')
+        original = {k: os.environ.get(k) for k in keys}
+        try:
+            for k in keys:
+                os.environ.pop(k, None)
+            for k, v in env_overrides.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            call_command('ensure_admin', quiet=True)
+        finally:
+            for k, v in original.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_creates_admin_user_if_missing(self):
+        User = get_user_model()
+        self.assertFalse(User.objects.filter(username='admin').exists())
+        self._run()
+        u = User.objects.get(username='admin')
+        self.assertTrue(u.is_superuser)
+        self.assertTrue(u.is_staff)
+        self.assertTrue(u.is_active)
+        self.assertTrue(u.check_password('admin'))
+
+    def test_idempotent_does_not_duplicate(self):
+        self._run()
+        self._run()
+        self._run()
+        User = get_user_model()
+        self.assertEqual(User.objects.filter(username='admin').count(), 1)
+
+    def test_refreshes_password_on_existing_user(self):
+        User = get_user_model()
+        u = User.objects.create_user('admin', 'old@x.test', 'old-password')
+        u.is_superuser = False  # deliberately demoted
+        u.save()
+        self._run()
+        u.refresh_from_db()
+        self.assertTrue(u.is_superuser)  # promoted back
+        self.assertTrue(u.is_staff)
+        self.assertTrue(u.check_password('admin'))
+        self.assertFalse(u.check_password('old-password'))
+
+    def test_env_var_password_override(self):
+        self._run(EA_ADMIN_PASSWORD='s3cret-prod-pw')
+        u = get_user_model().objects.get(username='admin')
+        self.assertTrue(u.check_password('s3cret-prod-pw'))
+        self.assertFalse(u.check_password('admin'))
+
+    def test_env_var_username_override(self):
+        self._run(EA_ADMIN_USERNAME='root', EA_ADMIN_PASSWORD='root')
+        User = get_user_model()
+        self.assertTrue(User.objects.filter(username='root').exists())
+        u = User.objects.get(username='root')
+        self.assertTrue(u.check_password('root'))
+
+    def test_skip_flag_is_noop(self):
+        self._run(EA_ADMIN_SKIP='1')
+        self.assertFalse(get_user_model().objects.filter(username='admin').exists())
+
+    def test_post_migrate_signal_calls_command(self):
+        """post_migrate fires during test-DB setup (via setUpTestData / fixtures
+        not even needed) — but to validate the wiring without that subtlety
+        we just confirm signal handler is connected and callable."""
+        from django.db.models.signals import post_migrate
+        from accounting.apps import _run_ensure_admin
+        receivers = [
+            r[1]() for r in post_migrate.receivers if r[1]() is not None
+        ]
+        # If our handler is registered, it's referenced somewhere in receivers.
+        self.assertIn(_run_ensure_admin, receivers)

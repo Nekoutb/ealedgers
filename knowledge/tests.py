@@ -468,19 +468,80 @@ class K20LoaderTests(TestCase):
 
 
 class KnowledgeBaseTotalsTests(TestCase):
-    """Cross-slice sanity: the encoded SYSCOHADA base spans K01+K15+K20+K02."""
+    """Cross-slice sanity: the SYSCOHADA base spans K01+K15+K20+K02+K04."""
 
     def test_total_syscohada_rules(self):
-        # 12 (K01) + 15 (K15) + 12 (K20) + 8 (K02) = 47
+        # 12 (K01) + 15 (K15) + 12 (K20) + 8 (K02) + 11 (K04) = 58
         self.assertEqual(
-            Rule.objects.filter(framework="SYSCOHADA-2017").count(), 47)
+            Rule.objects.filter(framework="SYSCOHADA-2017").count(), 58)
 
-    def test_four_slices_present(self):
+    def test_five_slices_present(self):
         slices = set(
             Rule.objects.filter(framework="SYSCOHADA-2017")
             .values_list("knowledge_slice", flat=True)
         )
-        self.assertEqual(slices, {"K01", "K15", "K20", "K02"})
+        self.assertEqual(slices, {"K01", "K15", "K20", "K02", "K04"})
+
+
+# ---------------------------------------------------------------------------
+# Step 22 — K04 SYSCOHADA asset-impairment (dépréciation des immobilisations)
+# ---------------------------------------------------------------------------
+
+
+class K04LoaderTests(TestCase):
+    """K04 loads via migration 0008 and is retrievable."""
+
+    def test_k04_rules_present(self):
+        n = Rule.objects.filter(knowledge_slice="K04",
+                                framework="SYSCOHADA-2017").count()
+        self.assertEqual(n, 11)
+
+    def test_key_impairment_rules_encoded(self):
+        for slug in ("syscohada-impairment-test-principle",
+                     "syscohada-impairment-recognition",
+                     "syscohada-impairment-reversal-cap",
+                     "syscohada-impairment-group-allocation",
+                     "syscohada-impairment-goodwill-no-reversal",
+                     "syscohada-impairment-revalued-asset",
+                     "syscohada-impairment-subsidized-asset"):
+            self.assertTrue(Rule.objects.filter(slug=slug).exists(),
+                            f"{slug} missing")
+
+    def test_reversal_cap_rationale(self):
+        r = Rule.objects.get(slug="syscohada-impairment-reversal-cap")
+        self.assertEqual(
+            r.effects["plafond"],
+            "VNC_qui_aurait_existe_sur_base_historique_sans_depreciation",
+        )
+
+    def test_goodwill_impairment_irreversible(self):
+        r = Rule.objects.get(slug="syscohada-impairment-goodwill-no-reversal")
+        self.assertEqual(
+            r.effects["depreciation_du_fonds_commercial"],
+            "irreversible_jamais_reprise",
+        )
+
+    def test_impairment_accounts(self):
+        r = Rule.objects.get(slug="syscohada-impairment-accounts")
+        self.assertEqual(r.effects["dotations"]["corporelles"], "6914")
+        self.assertEqual(r.effects["depreciations_immobilisations"], "291_a_297")
+
+    def test_all_k04_need_expert_review(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K04")
+            .exclude(review_status="needs_review").exists()
+        )
+
+    def test_all_k04_are_framework_scope(self):
+        self.assertFalse(
+            Rule.objects.filter(knowledge_slice="K04")
+            .exclude(scope="framework").exists()
+        )
+
+    def test_retrieval_impairment_reversal(self):
+        res = retrieve("reprise depreciation plafond valeur nette comptable reevaluation",
+                       framework="SYSCOHADA-2017", k=1)
+        self.assertEqual(res[0]["slug"], "syscohada-impairment-reversal-cap")
 
 
 # ---------------------------------------------------------------------------

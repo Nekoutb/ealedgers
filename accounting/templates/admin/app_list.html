@@ -1,0 +1,62 @@
+{% comment %}
+EA Ledgers override of Django's admin/app_list.html.
+
+Stock Django renders each app's models as a vertical <table> (one row per
+model). With ~22 accounting models that list is very long and hard to scan.
+
+This override renders each app's models as a responsive GRID of cards, so
+the whole model set forms a compact block (roughly a square) the user can
+take in at a glance — ~5 cards per row, wrapping into rows.
+
+Card = model name (links to its changelist) + small Add / Change actions.
+
+Context provided by Django (unchanged):
+  app_list[].app_label, .name, .app_url, .models[]
+  model.name, .object_name, .admin_url, .add_url, .view_only
+  show_changelinks (True on the index page)
+
+Styling lives in accounting/templates/admin/base_site.html (the .ea-model-*
+classes).
+{% endcomment %}
+{% load i18n %}
+
+{% if app_list %}
+  {% for app in app_list %}
+    <div class="app-{{ app.app_label }} module ea-app-module{% if app.app_url in request.path|urlencode %} current-app{% endif %}">
+      <h2 class="ea-app-caption">
+        <a href="{{ app.app_url }}" class="section"
+           title="{% blocktranslate with name=app.name %}Models in the {{ name }} application{% endblocktranslate %}">{{ app.name }}</a>
+      </h2>
+
+      <div class="ea-model-grid">
+        {% for model in app.models %}
+          {% with model_name=model.object_name|lower %}
+          <div class="ea-model-card model-{{ model_name }}{% if model.admin_url in request.path|urlencode %} current-model{% endif %}">
+            <div class="ea-model-name">
+              {% if model.admin_url %}
+                <a href="{{ model.admin_url }}"{% if model.admin_url in request.path|urlencode %} aria-current="page"{% endif %}>{{ model.name }}</a>
+              {% else %}
+                <span>{{ model.name }}</span>
+              {% endif %}
+            </div>
+            <div class="ea-model-actions">
+              {% if model.add_url %}
+                <a href="{{ model.add_url }}" class="ea-model-add">+ {% translate 'Add' %}</a>
+              {% endif %}
+              {% if model.admin_url and show_changelinks %}
+                {% if model.view_only %}
+                  <a href="{{ model.admin_url }}" class="ea-model-change">{% translate 'View' %}</a>
+                {% else %}
+                  <a href="{{ model.admin_url }}" class="ea-model-change">{% translate 'Change' %}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+          </div>
+          {% endwith %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <p>{% translate 'You don’t have permission to view or edit anything.' %}</p>
+{% endif %}

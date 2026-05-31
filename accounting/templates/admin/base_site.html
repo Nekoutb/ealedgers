@@ -290,12 +290,99 @@ div.breadcrumbs a:hover { color: var(--color-brand-darker); text-decoration: und
 }
 
 /* ============ INDEX / SITE ADMINISTRATION ============ */
-/* IMPORTANT: scope to body.dashboard only. The bare `#content-main`
-   selector applies on EVERY admin page — change_list, change_form,
-   etc. — and turning that into a grid breaks the changelist layout
-   (table + filter sidebar + object-tools become stacked grid rows
-   with no space for the filter to sit beside the table). */
-body.dashboard #content-main { display: grid; gap: 16px; }
+/* The site-administration index renders app modules (Accounting, Auth)
+   each containing a GRID of model cards (see accounting/templates/admin/
+   app_list.html). We make #content-main a single full-width column so the
+   model card-grid inside each module has the whole page to lay out into a
+   compact square, rather than being squished into a 2fr/1fr split with the
+   recent-actions sidebar.
+
+   Scoped to body.dashboard only — the bare #content-main selector applies
+   on EVERY admin page (change_list, change_form, …) and a grid there breaks
+   those layouts. */
+body.dashboard #content-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Model card grid inside each app module — ~5 cards per row, wrapping into
+   rows so the whole model set forms a compact block. */
+.ea-app-module { overflow: visible; }
+.ea-app-caption {
+  /* reuses .module h2 styling via the h2 tag below; nothing extra needed */
+}
+.ea-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  padding: 16px;
+}
+.ea-model-card {
+  border: 1px solid var(--neutral-200);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 78px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.ea-model-card:hover {
+  border-color: var(--color-brand);
+  box-shadow: 0 4px 12px -4px rgb(13 148 136 / 0.18);
+  transform: translateY(-1px);
+}
+.ea-model-card.current-model {
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
+}
+.ea-model-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  flex: 1;
+}
+.ea-model-name a, .ea-model-name span {
+  color: var(--neutral-950) !important;
+  text-decoration: none !important;
+}
+.ea-model-name a:hover { color: var(--color-brand-dark) !important; }
+.ea-model-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ea-model-actions a {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 5px;
+  text-decoration: none !important;
+  border: 1px solid var(--neutral-200);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.ea-model-add {
+  color: var(--color-brand-dark) !important;
+  background: var(--color-brand-soft);
+  border-color: var(--color-brand-soft) !important;
+}
+.ea-model-add:hover {
+  background: var(--color-brand) !important;
+  color: #fff !important;
+  border-color: var(--color-brand) !important;
+}
+.ea-model-change {
+  color: var(--neutral-700) !important;
+  background: #fff;
+}
+.ea-model-change:hover {
+  background: var(--neutral-100) !important;
+  color: var(--neutral-950) !important;
+  border-color: var(--neutral-300) !important;
+}
 
 /* IMPORTANT: only `div.module`, not bare `.app-accounting` / `.app-auth`.
    Django's admin adds `app-{appname}` classes to <body> on every page
@@ -417,11 +504,8 @@ div.module {
   font-weight: 400;
 }
 
-@media (min-width: 1024px) {
-  /* Same dashboard-only scoping — only the index page should be 2-col. */
-  body.dashboard #content-main { grid-template-columns: 2fr 1fr; align-items: start; }
-  body.dashboard #content-related { margin: 0; padding: 0; }
-}
+/* (Former 2fr/1fr split of #content-main removed in fix/admin-grid-layout —
+   the index now stacks app modules full-width with a card grid inside each.) */
 
 /* ============ CHANGE LIST ============ */
 #changelist {

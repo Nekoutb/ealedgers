@@ -911,7 +911,7 @@ class ProcedureUIViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "New procedure")
 
-    def test_create_post_creates_pending_procedure(self):
+    def test_create_post_creates_and_validates_procedure(self):
         resp = self.client.post(reverse("knowledge:procedure_create"), {
             "title": "Vehicles over 4 years",
             "description": "Straight-line, 48 months.",
@@ -924,9 +924,11 @@ class ProcedureUIViewTests(TestCase):
         proc = TenantProcedure.objects.for_tenant(self.acme).get(
             slug="vehicles-over-4-years")
         self.assertEqual(proc.tenant, self.acme)
-        self.assertEqual(proc.validation_status, "pending")
         self.assertEqual(proc.created_by, self.user)
         self.assertEqual(proc.effects["useful_life_months"], 48)
+        # Step-25 validator runs on save: 48 mo == 25 %/yr == the CGI
+        # vehicle ceiling, so it specialises (not violates) → validated.
+        self.assertEqual(proc.validation_status, "validated")
 
     def test_create_rejects_invalid_json(self):
         resp = self.client.post(reverse("knowledge:procedure_create"), {
@@ -939,14 +941,14 @@ class ProcedureUIViewTests(TestCase):
         self.assertFalse(
             TenantProcedure.objects.filter(slug="bad-json-proc").exists())
 
-    def test_edit_updates_and_resets_to_pending(self):
+    def test_edit_updates_and_revalidates(self):
         proc = TenantProcedure.objects.create(
             tenant=self.acme, slug="edit-me", title="Old title",
-            validation_status="validated")
+            validation_status="conflict")
         resp = self.client.post(
             reverse("knowledge:procedure_edit", args=["edit-me"]), {
                 "title": "New title",
-                "description": "Updated.",
+                "description": "Updated — no framework-touching effects.",
                 "trigger_conditions": "",
                 "effects": "",
                 "active": "on",
@@ -954,9 +956,148 @@ class ProcedureUIViewTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         proc.refresh_from_db()
         self.assertEqual(proc.title, "New title")
-        self.assertEqual(proc.validation_status, "pending")  # re-queued
+        # Editing re-runs the validator; the cleaned-up procedure now passes.
+        self.assertEqual(proc.validation_status, "validated")
 
     def test_edit_other_tenant_404(self):
         resp = self.client.get(
             reverse("knowledge:procedure_edit", args=["beta-secret"]))
         self.assertEqual(resp.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
+# Step 25 — procedure framework-conflict validator
+# ---------------------------------------------------------------------------
+
+
+class ProcedureValidatorTests(TestCase):
+    """validate_procedure() decides specialise (ok) vs violate (conflict),
+    citing the real framework rule. Framework rules come from migrations."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user("val_user", "v@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(
+            code="XAF", name="CFA Franc", decimal_places=0)
+        cls.t = Tenant.objects.create(
+            slug="val-t", name="Val T", currency=cls.xaf, owner=cls.user)
+
+    def _proc(self, **kw):
+        base = dict(tenant=self.t, slug="p", title="P",
+                    trigger_conditions={}, effects={})
+        base.update(kw)
+        return TenantProcedure(**base)
+
+    def test_cap_violation_is_conflict_with_citation(self):
+        from knowledge.validation import validate_procedure
+        status, notes = validate_procedure(
+            self._proc(effects={"head_office_fees_cap_pct": 5}))
+        self.assertEqual(status, "conflict")
+        self.assertIn("2.5", notes)        # the framework ceiling
+        self.assertIn("art. 7", notes)     # citation from the rule source_ref
+
+    def test_cap_equal_is_validated(self):
+        from knowledge.validation import validate_procedure
+        self.assertEqual(
+            validate_procedure(
+                self._proc(effects={"head_office_fees_cap_pct": 2.5}))[0],
+            "validated")
+
+    def test_cap_stricter_is_validated(self):
+        from knowledge.validation import validate_procedure
+        self.assertEqual(
+            validate_procedure(
+                self._proc(effects={"head_office_fees_cap_pct": 2.0}))[0],
+            "validated")
+
+    def test_loss_carryforward_too_long_is_conflict(self):
+        from knowledge.validation import validate_procedure
+        status, notes = validate_procedure(
+            self._proc(effects={"loss_carryforward_years": 6}))
+        self.assertEqual(status, "conflict")
+        self.assertIn("art. 12", notes)
+
+    def test_depreciation_within_ceiling_validated(self):
+        from knowledge.validation import validate_procedure
+        # vehicles over 4 years => 25%/yr == CGI ceiling → specialises, ok
+        self.assertEqual(
+            validate_procedure(self._proc(
+                trigger_conditions={"asset_class": "vehicles"},
+                effects={"useful_life_years": 4}))[0],
+            "validated")
+
+    def test_depreciation_exceeds_ceiling_conflict(self):
+        from knowledge.validation import validate_procedure
+        # vehicles over 2 years => 50%/yr > 25% ceiling → conflict
+        status, notes = validate_procedure(self._proc(
+            trigger_conditions={"asset_class": "vehicles"},
+            effects={"useful_life_years": 2}))
+        self.assertEqual(status, "conflict")
+        self.assertIn("25", notes)
+        self.assertIn("art. 7", notes)
+
+    def test_unrecognised_effects_validated_with_p05_note(self):
+        from knowledge.validation import validate_procedure
+        status, notes = validate_procedure(
+            self._proc(effects={"some_internal_policy": "whatever"}))
+        self.assertEqual(status, "validated")
+        self.assertIn("P05", notes)
+
+    def test_malformed_structure_is_conflict(self):
+        from knowledge.validation import validate_procedure
+        status, notes = validate_procedure(
+            self._proc(effects=["not", "a", "dict"]))
+        self.assertEqual(status, "conflict")
+        self.assertIn("JSON object", notes)
+
+
+class ProcedureValidationIntegrationTests(TestCase):
+    """The validator runs on save through the create view (Step 24 + 25)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user("vi_user", "vi@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(
+            code="XAF", name="CFA Franc", decimal_places=0)
+        cls.t = Tenant.objects.create(
+            slug="vi-t", name="VI T", currency=cls.xaf, owner=cls.user)
+        Membership.objects.create(user=cls.user, tenant=cls.t, role="owner")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_create_violating_procedure_flagged_conflict(self):
+        self.client.post(reverse("knowledge:procedure_create"), {
+            "title": "Generous head office",
+            "description": "Deduct head-office fees up to 5%.",
+            "trigger_conditions": "",
+            "effects": '{"head_office_fees_cap_pct": 5}',
+            "active": "on",
+        })
+        proc = TenantProcedure.objects.for_tenant(self.t).get(
+            slug="generous-head-office")
+        self.assertEqual(proc.validation_status, "conflict")
+        self.assertIn("2.5", proc.validation_notes)
+
+    def test_create_specialising_procedure_validated(self):
+        self.client.post(reverse("knowledge:procedure_create"), {
+            "title": "Vehicles four years",
+            "description": "Depreciate vehicles over 4 years.",
+            "trigger_conditions": '{"asset_class": "vehicles"}',
+            "effects": '{"useful_life_years": 4}',
+            "active": "on",
+        })
+        proc = TenantProcedure.objects.for_tenant(self.t).get(
+            slug="vehicles-four-years")
+        self.assertEqual(proc.validation_status, "validated")
+
+    def test_conflict_renders_on_list(self):
+        self.client.post(reverse("knowledge:procedure_create"), {
+            "title": "Bad commissions", "description": "x",
+            "trigger_conditions": "",
+            "effects": '{"commissions_cap_pct": 9}', "active": "on",
+        })
+        resp = self.client.get(reverse("knowledge:procedure_list"))
+        self.assertContains(resp, "Conflicts with framework")

@@ -23,6 +23,7 @@ from accounting.middleware import tenant_required
 from .forms import TenantProcedureForm, unique_procedure_slug
 from .models import Rule, TenantProcedure
 from .retrieval import retrieve
+from .validation import validate_and_apply
 
 
 @login_required
@@ -210,8 +211,9 @@ def procedure_create_view(request):
             proc.slug = unique_procedure_slug(
                 request.tenant, form.cleaned_data["title"])
             proc.created_by = request.user
-            proc.validation_status = "pending"
             proc.save()
+            # Step 25: check it against the framework (specialise vs violate).
+            validate_and_apply(proc)
             return redirect(reverse("knowledge:procedure_list"))
     else:
         form = TenantProcedureForm(tenant=request.tenant)
@@ -234,8 +236,9 @@ def procedure_edit_view(request, slug):
         if form.is_valid():
             obj = form.save(commit=False)
             obj.tenant = request.tenant  # ownership never changes
-            obj.validation_status = "pending"
             obj.save()
+            # Step 25: edited content is re-checked against the framework.
+            validate_and_apply(obj)
             return redirect(reverse("knowledge:procedure_list"))
     else:
         form = TenantProcedureForm(instance=proc, tenant=request.tenant)

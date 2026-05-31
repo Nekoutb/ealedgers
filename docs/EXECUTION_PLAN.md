@@ -377,6 +377,7 @@ unlock the next step.
 | 2026-05-31 | 7    | Provenance + AgentRun + AgentToolCall + ERPConnection + ERPOperation models landed. Migration 0010 also extends RLS. |
 | 2026-05-31 | 7+   | Interleaved fix (owner request): admin Site-administration model list rendered as a card grid (≈5×5 square) instead of a vertical list. |
 | 2026-05-31 | 8    | Tenant.accounting_framework + Tenant.agent_enabled added; TenantDepartmentSubscription model (per-tenant department staffing). Migration 0011 extends RLS. |
+| 2026-05-31 | 9    | Data migration 0012 backfills a Provenance(source='manual') row for every existing JournalEntry. Idempotent + reversible. Runs on next deploy. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

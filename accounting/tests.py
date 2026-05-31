@@ -2236,3 +2236,104 @@ class TenantDepartmentSubscriptionTests(TestCase):
             TenantDepartmentSubscription.objects.for_tenant(self.tenant).count(), 1)
         self.assertEqual(
             TenantDepartmentSubscription.objects.for_tenant(self.other).count(), 1)
+
+
+# ---------------------------------------------------------------------------
+# Step 9 — backfill Provenance for existing journal entries (data migration)
+# ---------------------------------------------------------------------------
+
+
+class BackfillProvenanceTests(TestCase):
+    """Exercises the data-migration functions directly. The test DB runs the
+    migration on empty tables (so it creates nothing); here we build a JE and
+    call the migration's backfill/remove functions against the live apps
+    registry to prove correctness, idempotency, and reversibility."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.alice = User.objects.create_superuser("alice_bf", "a@a.test", "x")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
+        cls.tenant = _make_tenant("bf-co", currency=cls.xaf, owner=cls.alice)
+        cls.acct1 = Account.objects.create(
+            tenant=cls.tenant, code="571000", name="Cash", type="asset_cash",
+        )
+        cls.acct2 = Account.objects.create(
+            tenant=cls.tenant, code="618000", name="Misc expense", type="expense",
+        )
+        cls.journal = Journal.objects.create(
+            tenant=cls.tenant, code="OD", name="Misc", type="general",
+        )
+
+    @property
+    def mig(self):
+        # Imported per-call (not cached on the class) — a module object can't
+        # be deep-copied by Django's setUpTestData fixture machinery.
+        import importlib
+        return importlib.import_module(
+            'accounting.migrations.0012_backfill_provenance_for_existing_jes'
+        )
+
+    @property
+    def apps(self):
+        from django.apps import apps as django_apps
+        return django_apps
+
+    def setUp(self):
+        Provenance.objects.all().delete()
+
+    def _make_je(self, name="OD/00001"):
+        je = JournalEntry.objects.create(
+            tenant=self.tenant, journal=self.journal, name=name,
+            date=date(2026, 5, 31), state="posted",
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=je, account=self.acct1, debit=Decimal("100"),
+        )
+        JournalEntryLine.objects.create(
+            tenant=self.tenant, entry=je, account=self.acct2, credit=Decimal("100"),
+        )
+        return je
+
+    def test_backfill_creates_one_provenance_per_je(self):
+        je1 = self._make_je("OD/00001")
+        je2 = self._make_je("OD/00002")
+        self.assertEqual(Provenance.objects.count(), 0)
+        self.mig.backfill_provenance(self.apps, None)
+        self.assertEqual(Provenance.objects.count(), 2)
+        for je in (je1, je2):
+            pv = Provenance.objects.get(journal_entry=je)
+            self.assertEqual(pv.source, "manual")
+            self.assertEqual(pv.tenant_id, self.tenant.id)
+            self.assertTrue(pv.extra.get("backfilled"))
+            self.assertIn(je.name, pv.summary)
+
+    def test_backfill_is_idempotent(self):
+        self._make_je("OD/00001")
+        self.mig.backfill_provenance(self.apps, None)
+        self.mig.backfill_provenance(self.apps, None)
+        self.mig.backfill_provenance(self.apps, None)
+        self.assertEqual(Provenance.objects.count(), 1)
+
+    def test_backfill_skips_jes_that_already_have_provenance(self):
+        je = self._make_je("OD/00001")
+        Provenance.objects.create(
+            tenant=self.tenant, journal_entry=je, source="agent",
+            summary="real agent provenance",
+        )
+        self.mig.backfill_provenance(self.apps, None)
+        self.assertEqual(Provenance.objects.filter(journal_entry=je).count(), 1)
+        self.assertEqual(
+            Provenance.objects.get(journal_entry=je).source, "agent")
+
+    def test_reverse_removes_only_backfilled_rows(self):
+        self._make_je("OD/00001")
+        keeper = Provenance.objects.create(
+            tenant=self.tenant, source="manual", summary="hand-made, keep me",
+            extra={},
+        )
+        self.mig.backfill_provenance(self.apps, None)
+        self.assertEqual(Provenance.objects.count(), 2)
+        self.mig.remove_backfilled_provenance(self.apps, None)
+        self.assertEqual(Provenance.objects.count(), 1)
+        self.assertTrue(Provenance.objects.filter(id=keeper.id).exists())

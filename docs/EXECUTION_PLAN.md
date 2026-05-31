@@ -384,6 +384,7 @@ unlock the next step.
 | 2026-05-31 | 12   | Django-Q2 code/config portion landed (ORM broker, no Redis; django_q in INSTALLED_APPS; Q_CLUSTER settings; tables migrate on deploy). Worker systemd unit template added at scripts/ealedgers-worker.service — installed during the SSH bundle. GH-Actions worker-restart hook also deferred to the SSH bundle. |
 | 2026-05-31 | 13   | (Option A split) Crossed into Phase P02. knowledge app gets Rule + Citation + TenantProcedure models (migration 0001). RuleVector (pgvector) deferred to after the SSH bundle; retrieval (Step 14) will use FTS first, vector added on top. RLS on knowledge_tenantprocedure. |
 | 2026-05-31 | 14   | Rule retrieval: knowledge/retrieval.py retrieve() (portable keyword ranking now; upgradeable to Postgres FTS then pgvector — stable signature) + JSON endpoint /knowledge/retrieve/. Tenant procedures ranked alongside framework rules. |
+| 2026-05-31 | 15   | Encoded K01 (SYSCOHADA chart-of-accounts structure): 12 Rule rows — 9 account classes + balance/result split, terminaison-9, charge/produit parallelism. Authored from SYSCOHADA Titre VII Ch.2 (p.218-225, read directly). Fixture + idempotent loader + load_knowledge command + data migration 0002 (auto-loads on deploy). All rules review_status=needs_review pending the Step-27 expert gate. Source text is authentic French → French retrieval strong; English weak until pgvector. |
 
 When this plan is amended (e.g. a step splits, a phase reorders), the change is
 recorded here with the triggering step number and a brief reason.

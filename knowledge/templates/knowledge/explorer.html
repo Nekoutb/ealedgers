@@ -1,0 +1,210 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}Knowledge Base · Rule Explorer{% endblock %}
+
+{% block content %}
+<section class="ke">
+
+  <!-- ===== Masthead ===== -->
+  <header class="ke-head">
+    <div class="ke-head-text">
+      <div class="ke-eyebrow">Knowledge Base</div>
+      <h1 class="ke-title">Rule Explorer</h1>
+      <p class="ke-lede">Every rule the agents reason over — sourced, cited,
+        and traceable to its framework article.</p>
+    </div>
+    <dl class="ke-stats" aria-label="Knowledge base statistics">
+      <div class="ke-stat"><dt>Rules</dt><dd>{{ total_rules }}</dd></div>
+      <div class="ke-stat"><dt>Frameworks</dt><dd>{{ frameworks|length }}</dd></div>
+      <div class="ke-stat"><dt>Slices</dt><dd>{{ slices|length }}</dd></div>
+      <div class="ke-stat ke-stat--warn"><dt>Pending review</dt><dd>{{ pending_review }}</dd></div>
+    </dl>
+  </header>
+
+  <!-- ===== Search + filters ===== -->
+  <form class="ke-search" method="get" action="{% url 'knowledge:explorer' %}" role="search">
+    <div class="ke-search-row">
+      <div class="ke-field ke-field--grow">
+        <svg class="ke-search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="search" name="q" value="{{ query }}" autocomplete="off"
+               placeholder="Search rules — e.g. “minimum de perception”, “retenue à la source”, “amortissement”…"
+               aria-label="Search rules">
+      </div>
+      <button type="submit" class="ke-btn ke-btn--go">Search</button>
+    </div>
+    <div class="ke-filters">
+      <label class="ke-select">
+        <span>Framework</span>
+        <select name="framework" onchange="this.form.submit()">
+          <option value="">All frameworks</option>
+          {% for f in frameworks %}
+            <option value="{{ f }}" {% if f == sel_framework %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="ke-select">
+        <span>Scope</span>
+        <select name="scope" onchange="this.form.submit()">
+          <option value="">All scopes</option>
+          {% for val, lbl in scopes %}
+            <option value="{{ val }}" {% if val == sel_scope %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="ke-select">
+        <span>Slice</span>
+        <select name="slice" onchange="this.form.submit()">
+          <option value="">All slices</option>
+          {% for s in slices %}
+            <option value="{{ s }}" {% if s == sel_slice %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if query or sel_framework or sel_scope or sel_slice %}
+        <a class="ke-clear" href="{% url 'knowledge:explorer' %}">Clear all</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <!-- ===== Result meta ===== -->
+  <div class="ke-meta">
+    {% if searching %}
+      <strong>{{ result_count }}</strong> rule{{ result_count|pluralize }} ranked for
+      “<span class="ke-q">{{ query }}</span>”
+    {% else %}
+      Showing <strong>{{ result_count }}</strong> rule{{ result_count|pluralize }}
+      {% if sel_framework or sel_scope or sel_slice %}<span class="ke-muted">(filtered)</span>{% endif %}
+    {% endif %}
+  </div>
+
+  <!-- ===== Results ===== -->
+  {% if rows %}
+    <ul class="ke-list">
+      {% for r in rows %}
+        <li class="ke-card" data-framework="{{ r.framework }}" data-kind="{{ r.kind }}">
+          {% if r.kind == "rule" %}
+          <a class="ke-card-link" href="{% url 'knowledge:rule_detail' r.slug %}">
+          {% else %}
+          <div class="ke-card-link ke-card-link--static">
+          {% endif %}
+            <div class="ke-card-top">
+              <span class="ke-badge ke-badge--fw">{{ r.framework|default:"Tenant procedure" }}</span>
+              {% if r.knowledge_slice %}<span class="ke-chip">{{ r.knowledge_slice }}</span>{% endif %}
+              {% if r.kind == "procedure" %}<span class="ke-chip ke-chip--proc">Your procedure</span>{% endif %}
+              {% if r.review_status == "needs_review" %}
+                <span class="ke-badge ke-badge--warn" title="Awaiting expert sign-off (Step 27)">Needs review</span>
+              {% elif r.review_status == "verified" %}
+                <span class="ke-badge ke-badge--ok">Verified</span>
+              {% endif %}
+              {% if searching %}<span class="ke-score" title="Relevance score">{{ r.score }}</span>{% endif %}
+            </div>
+            <h2 class="ke-card-title">{{ r.title }}</h2>
+            {% if r.source_ref %}<div class="ke-ref">{{ r.source_ref }}</div>{% endif %}
+            {% if r.snippet %}<p class="ke-snippet">{{ r.snippet }}{% if r.snippet|length >= 240 %}…{% endif %}</p>{% endif %}
+          {% if r.kind == "rule" %}</a>{% else %}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="ke-empty">
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <p>No rules match. Try a broader term or <a href="{% url 'knowledge:explorer' %}">clear the filters</a>.</p>
+    </div>
+  {% endif %}
+
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ke { --ke-ink:#0a0a0a; --ke-muted:#737373; --ke-hair:#e5e5e5; --ke-brand:#0d9488;
+        --ke-brand-soft:#ccfbf1; --ke-warn:#b45309; --ke-warn-soft:#fef3c7;
+        --ke-ok:#047857; --ke-ok-soft:#d1fae5; color:var(--ke-ink); }
+
+  /* Masthead */
+  .ke-head { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+             gap:1.5rem 2rem; padding-bottom:1.5rem; border-bottom:1px solid var(--ke-hair); }
+  .ke-eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase;
+                color:var(--ke-brand); font-weight:600; }
+  .ke-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .15rem; }
+  .ke-lede { color:var(--ke-muted); max-width:46ch; font-size:.95rem; }
+  .ke-stats { display:flex; gap:.6rem; margin:0; flex-wrap:wrap; }
+  .ke-stat { background:#fff; border:1px solid var(--ke-hair); border-radius:12px;
+             padding:.55rem .9rem; min-width:84px; }
+  .ke-stat dt { font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:var(--ke-muted); }
+  .ke-stat dd { margin:0; font-size:1.5rem; font-weight:650; letter-spacing:-.02em; line-height:1.1; }
+  .ke-stat--warn dd { color:var(--ke-warn); }
+
+  /* Search */
+  .ke-search { margin:1.5rem 0 .5rem; }
+  .ke-search-row { display:flex; gap:.6rem; }
+  .ke-field { position:relative; display:flex; align-items:center; }
+  .ke-field--grow { flex:1; }
+  .ke-search-icon { position:absolute; left:.85rem; color:var(--ke-muted); pointer-events:none; }
+  .ke-field input { width:100%; padding:.8rem 1rem .8rem 2.7rem; border:1px solid var(--ke-hair);
+                    border-radius:12px; font-size:.95rem; background:#fff;
+                    font-family:inherit; transition:border-color .15s, box-shadow .15s; }
+  .ke-field input:focus { outline:none; border-color:var(--ke-brand);
+                          box-shadow:0 0 0 3px var(--ke-brand-soft); }
+  .ke-btn { border:none; cursor:pointer; font-family:inherit; font-weight:600; border-radius:12px;
+            padding:.8rem 1.4rem; font-size:.9rem; transition:transform .08s, background .15s; }
+  .ke-btn:active { transform:translateY(1px); }
+  .ke-btn--go { background:var(--ke-ink); color:#fff; }
+  .ke-btn--go:hover { background:#262626; }
+  .ke-filters { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.7rem; margin-top:.8rem; }
+  .ke-select { display:flex; flex-direction:column; gap:.25rem; }
+  .ke-select span { font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:var(--ke-muted); padding-left:.15rem; }
+  .ke-select select { border:1px solid var(--ke-hair); border-radius:10px; padding:.5rem 2rem .5rem .7rem;
+                      font-size:.85rem; background:#fff; font-family:inherit; cursor:pointer;
+                      appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='3'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+                      background-repeat:no-repeat; background-position:right .6rem center; }
+  .ke-select select:focus { outline:none; border-color:var(--ke-brand); box-shadow:0 0 0 3px var(--ke-brand-soft); }
+  .ke-clear { font-size:.82rem; color:var(--ke-muted); text-decoration:underline; text-underline-offset:3px; padding-bottom:.55rem; }
+  .ke-clear:hover { color:var(--ke-ink); }
+
+  /* Meta */
+  .ke-meta { margin:1.4rem 0 .9rem; color:var(--ke-muted); font-size:.9rem; }
+  .ke-meta strong { color:var(--ke-ink); }
+  .ke-q { color:var(--ke-brand); font-weight:600; }
+  .ke-muted { color:var(--ke-muted); }
+
+  /* Result cards */
+  .ke-list { list-style:none; padding:0; margin:0; display:grid; gap:.8rem;
+             grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); }
+  .ke-card { background:#fff; border:1px solid var(--ke-hair); border-radius:14px;
+             overflow:hidden; position:relative; transition:border-color .15s, box-shadow .15s, transform .1s; }
+  .ke-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--ke-brand); opacity:.8; }
+  .ke-card[data-framework="CGI-2025"]::before { background:#4f46e5; }
+  .ke-card[data-kind="procedure"]::before { background:#db2777; }
+  .ke-card:hover { border-color:#d4d4d4; box-shadow:0 6px 22px -12px rgba(0,0,0,.22); transform:translateY(-1px); }
+  .ke-card-link { display:block; padding:1rem 1.15rem 1.15rem; color:inherit; text-decoration:none; height:100%; }
+  .ke-card-link--static { cursor:default; }
+  .ke-card-top { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem; margin-bottom:.55rem; }
+  .ke-badge { font-size:.66rem; font-weight:600; letter-spacing:.03em; padding:.2rem .5rem; border-radius:999px; white-space:nowrap; }
+  .ke-badge--fw { background:var(--ke-brand-soft); color:#0f766e; }
+  .ke-card[data-framework="CGI-2025"] .ke-badge--fw { background:#e0e7ff; color:#4338ca; }
+  .ke-card[data-kind="procedure"] .ke-badge--fw { background:#fce7f3; color:#be185d; }
+  .ke-badge--warn { background:var(--ke-warn-soft); color:var(--ke-warn); }
+  .ke-badge--ok { background:var(--ke-ok-soft); color:var(--ke-ok); }
+  .ke-chip { font-size:.66rem; font-weight:600; font-family:"Geist Mono", ui-monospace, monospace;
+             background:#f5f5f5; color:#525252; padding:.2rem .45rem; border-radius:6px; }
+  .ke-chip--proc { background:#fce7f3; color:#be185d; font-family:inherit; }
+  .ke-score { margin-left:auto; font-family:"Geist Mono", ui-monospace, monospace; font-size:.7rem;
+              color:var(--ke-muted); background:#fafafa; border:1px solid var(--ke-hair); border-radius:6px; padding:.1rem .4rem; }
+  .ke-card-title { font-size:1.02rem; font-weight:600; line-height:1.25; letter-spacing:-.01em; margin:0 0 .4rem; }
+  .ke-ref { font-family:"Geist Mono", ui-monospace, monospace; font-size:.74rem; color:var(--ke-brand); margin-bottom:.5rem; }
+  .ke-card[data-framework="CGI-2025"] .ke-ref { color:#4f46e5; }
+  .ke-snippet { font-size:.85rem; line-height:1.5; color:var(--ke-muted); margin:0;
+                display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
+  /* Empty */
+  .ke-empty { text-align:center; padding:4rem 1rem; color:var(--ke-muted); }
+  .ke-empty svg { color:#d4d4d4; margin-bottom:.8rem; }
+  .ke-empty a { color:var(--ke-brand); text-decoration:underline; text-underline-offset:3px; }
+
+  @media (max-width:640px) {
+    .ke-title { font-size:1.7rem; }
+    .ke-list { grid-template-columns:1fr; }
+    .ke-search-row { flex-direction:column; }
+  }
+</style>
+{% endblock %}

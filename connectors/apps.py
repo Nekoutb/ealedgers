@@ -16,3 +16,8 @@ class ConnectorsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'connectors'
     verbose_name = 'Connectors (ERP capability layer)'
+
+    def ready(self):
+        # Import connector modules for their @register_connector side effect
+        # so the factory can resolve each vendor (Step 30+).
+        from connectors.odoo import connector  # noqa: F401

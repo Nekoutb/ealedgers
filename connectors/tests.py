@@ -114,8 +114,14 @@ class ConnectorRegistryTests(SimpleTestCase):
         self.assertIsInstance(connector_for_vendor("manual"), NullConnector)
 
     def test_unregistered_vendor_raises(self):
+        # sap_b1 is a known ERP vendor with no connector yet (Odoo is now
+        # registered as of Step 30).
         with self.assertRaises(ConnectorNotImplemented):
-            connector_for_vendor("odoo")  # registered in Step 29
+            connector_for_vendor("sap_b1")
+
+    def test_odoo_vendor_resolves(self):
+        from connectors.odoo.connector import OdooConnector
+        self.assertIsInstance(connector_for_vendor("odoo", {}), OdooConnector)
 
     def test_register_connector_rejects_non_connector(self):
         with self.assertRaises(TypeError):
@@ -148,6 +154,6 @@ class BuildConnectorFromModelTests(TestCase):
         xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
         t = Tenant.objects.create(slug="conn-t2", name="Conn T2", currency=xaf)
         conn = ERPConnection.objects.create(
-            tenant=t, name="Future Odoo", vendor="odoo")
+            tenant=t, name="Future SAP", vendor="sap_b1")
         with self.assertRaises(ConnectorNotImplemented):
             build_connector(conn)

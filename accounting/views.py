@@ -1,42 +1,80 @@
-"""Views for the accounting app — both the workspace launcher and the
-in-module pages (dashboard, reports). All in-module views go through
-``@tenant_required`` so they always see a real ``request.tenant`` and use
-``Model.objects.for_tenant(request.tenant)`` to scope every query."""
+"""Views for the EA Ledgers platform shell.
 
-from datetime import date, timedelta
-from decimal import Decimal
+Post-pivot, this app holds the multi-tenant SHELL — login → workspace home,
+self-serve sign-up, tenant switching — plus read-only platform pages that
+present the virtual-finance-function vision: Departments, Agent Activity,
+ERP Connections.
+
+The accounting DATA layer (chart of accounts, journals, entries, periods,
+invoices/bills/bank) still lives in ``models.py`` and is reached through the
+Django admin (the "Ledger"); the agents will drive it from Phase P05. The v1
+manual data-entry UI (dashboard, invoicing, bills, bank rec, report pages)
+was retired in the post-pivot cleanup — those flows belong to the department
+agents + the ERP, not hand-keyed screens.
+"""
 
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Q, F
 from django.http import HttpResponseRedirect
-from django.shortcuts import render, redirect
-from django.urls import reverse
-from django.views.decorators.http import require_POST
+from django.shortcuts import redirect, render
 
 from .forms import SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
-    Account,
-    BankStatement,
-    BankStatementLine,
-    CustomerInvoice,
-    DepreciationLine,
-    FixedAsset,
-    Journal,
-    JournalEntry,
-    JournalEntryLine,
-    Membership,
-    Partner,
-    SupplierBill,
+    AgentRun,
+    ERPConnection,
+    SUBSCRIBABLE_DEPARTMENTS,
 )
+from django.views.decorators.http import require_POST
 
 
 # ---------------------------------------------------------------------------
-# Module icons (used by the workspace launcher only)
+# Tile icons for the workspace home
 # ---------------------------------------------------------------------------
 
-ICON_ACCOUNTING = """
+ICON_KNOWLEDGE = """
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#0d9488"/>
+  <path d="M7.5 9 H15 a1.6 1.6 0 0 1 1.6 1.6 V24 a2 2 0 0 0-2-2 H7.5 Z" fill="white"/>
+  <path d="M24.5 9 H17 a1.6 1.6 0 0 0-1.6 1.6 V24 a2 2 0 0 1 2-2 H24.5 Z" fill="white" opacity="0.82"/>
+</svg>
+""".strip()
+
+ICON_DEPARTMENTS = """
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#C2526D"/>
+  <g fill="white">
+    <circle cx="12.5" cy="12.5" r="3.4"/>
+    <path d="M6.2 25 Q6.2 17.6 12.5 17.6 Q18.8 17.6 18.8 25 Z"/>
+    <circle cx="22" cy="14" r="2.8"/>
+    <path d="M16.8 25 Q16.8 19.6 22 19.6 Q27.2 19.6 27.2 25 Z" opacity="0.78"/>
+  </g>
+</svg>
+""".strip()
+
+ICON_AGENTS = """
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#4f46e5"/>
+  <path d="M16 6.5 l2.4 5.6 6.1 0.5 -4.6 4 1.4 6 -5.3-3.3 -5.3 3.3 1.4-6 -4.6-4 6.1-0.5 Z" fill="white"/>
+</svg>
+""".strip()
+
+ICON_ERP = """
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#2E8B8E"/>
+  <g stroke="white" stroke-width="1.7" stroke-linecap="round">
+    <line x1="11" y1="10.5" x2="21" y2="16"/>
+    <line x1="21" y1="16" x2="11" y2="21.5"/>
+  </g>
+  <g fill="white">
+    <circle cx="10.5" cy="10.5" r="3"/>
+    <circle cx="21.5" cy="16" r="3"/>
+    <circle cx="10.5" cy="21.5" r="3"/>
+  </g>
+</svg>
+""".strip()
+
+ICON_LEDGER = """
 <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
   <rect width="32" height="32" rx="7" fill="#0B6E4F"/>
   <g fill="white">
@@ -47,123 +85,44 @@ ICON_ACCOUNTING = """
 </svg>
 """.strip()
 
-ICON_MISSIONS = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#C0563A"/>
-  <path d="M6 16 L26 6 L20 26 L16.5 17.5 Z" fill="white"/>
-  <path d="M16.5 17.5 L26 6" stroke="#C0563A" stroke-width="1.2" stroke-linecap="round"/>
-</svg>
-""".strip()
 
-ICON_TIME = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#2E4A6B"/>
-  <circle cx="16" cy="16" r="8" fill="none" stroke="white" stroke-width="2.2"/>
-  <path d="M16 10.5 V16 L20 18" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
-""".strip()
-
-ICON_PURCHASE = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#D49B1A"/>
-  <path d="M16 6.5 L25.5 11 L25.5 21 L16 25.5 L6.5 21 L6.5 11 Z" fill="white"/>
-  <path d="M6.5 11 L16 15.6 L25.5 11 M16 15.6 L16 25.5 M11.2 8.7 L20.7 13.3" stroke="#D49B1A" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
-</svg>
-""".strip()
-
-ICON_BILLING = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#7B3F71"/>
-  <path d="M9 6.5 L20 6.5 L24 10.5 L24 25.5 L9 25.5 Z" fill="white"/>
-  <path d="M20 6.5 L20 10.5 L24 10.5" fill="#7B3F71"/>
-  <g stroke="#7B3F71" stroke-width="1.6" stroke-linecap="round">
-    <line x1="12.5" y1="15" x2="20.5" y2="15"/>
-    <line x1="12.5" y1="18.5" x2="20.5" y2="18.5"/>
-    <line x1="12.5" y1="22" x2="17" y2="22"/>
-  </g>
-</svg>
-""".strip()
-
-ICON_PEOPLE = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#C2526D"/>
-  <g fill="white">
-    <circle cx="12.5" cy="12.5" r="3.6"/>
-    <path d="M6 25.5 Q6 17.5 12.5 17.5 Q19 17.5 19 25.5 Z"/>
-    <circle cx="22" cy="14" r="3"/>
-    <path d="M16.5 25.5 Q16.5 19.5 22 19.5 Q27.5 19.5 27.5 25.5 Z" opacity="0.78"/>
-  </g>
-</svg>
-""".strip()
-
-ICON_ENGAGEMENTS = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#2E8B8E"/>
-  <g stroke="white" stroke-width="1.7" stroke-linecap="round">
-    <line x1="11" y1="10" x2="22" y2="16"/>
-    <line x1="22" y1="16" x2="11" y2="22"/>
-  </g>
-  <g fill="white">
-    <circle cx="10.5" cy="10" r="3.2"/>
-    <circle cx="22" cy="16" r="3.2"/>
-    <circle cx="10.5" cy="22" r="3.2"/>
-  </g>
-</svg>
-""".strip()
-
-ICON_REPORTS = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#E07B30"/>
-  <g fill="white">
-    <rect x="6.5" y="19" width="4" height="7" rx="0.4"/>
-    <rect x="14" y="13" width="4" height="13" rx="0.4"/>
-    <rect x="21.5" y="7.5" width="4" height="18.5" rx="0.4"/>
-  </g>
-  <path d="M6.5 11 L14 14 L21.5 6.5" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>
-</svg>
-""".strip()
-
-ICON_SETTINGS = """
-<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="7" fill="#3F3F3F"/>
-  <g fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="16" cy="16" r="3.5"/>
-    <path d="M16 5.5 V8.5 M16 23.5 V26.5 M5.5 16 H8.5 M23.5 16 H26.5 M8.6 8.6 L10.8 10.8 M21.2 21.2 L23.4 23.4 M23.4 8.6 L21.2 10.8 M8.6 23.4 L10.8 21.2"/>
-  </g>
-</svg>
-""".strip()
-
-
-# ---------------------------------------------------------------------------
-# Module manifest for the workspace launcher
-# ---------------------------------------------------------------------------
-
+# The workspace home tiles. status: "live" (shipped) | "preview" (skeleton —
+# the data layer exists; the agent that fills it ships in a later phase).
 MODULES = [
-    {"slug": "missions",    "name": "Mission Orders",  "tagline": "Ordres de mission",
-     "url": None,           "status": "soon", "icon": ICON_MISSIONS},
-    {"slug": "timesheets",  "name": "Time Tracking",   "tagline": "Hours on engagements",
-     "url": None,           "status": "soon", "icon": ICON_TIME},
-    {"slug": "purchasing",  "name": "Purchase Orders", "tagline": "Procurement",
-     "url": None,           "status": "soon", "icon": ICON_PURCHASE},
-    {"slug": "engagements", "name": "Engagements",     "tagline": "Client projects",
-     "url": None,           "status": "soon", "icon": ICON_ENGAGEMENTS},
-    {"slug": "accounting",  "name": "Accounting",      "tagline": "General ledger",
-     "url": "/accounting/", "status": "live", "icon": ICON_ACCOUNTING},
-    {"slug": "billing",     "name": "Billing",         "tagline": "Customer invoices",
-     "url": "/accounting/invoices/", "status": "live", "icon": ICON_BILLING},
-    {"slug": "hr",          "name": "People",          "tagline": "Employees & grades",
-     "url": None,           "status": "soon", "icon": ICON_PEOPLE},
-    {"slug": "reports",     "name": "Reports",         "tagline": "Analytics",
-     "url": None,           "status": "soon", "icon": ICON_REPORTS},
-    {"slug": "settings",    "name": "Settings",        "tagline": "Configuration",
-     "url": None,           "status": "soon", "icon": ICON_SETTINGS},
+    {"name": "Knowledge Base", "tagline": "Sourced rules the agents reason over",
+     "url": "/knowledge/explorer/", "status": "live", "icon": ICON_KNOWLEDGE},
+    {"name": "Departments", "tagline": "Your virtual finance team",
+     "url": "/departments/", "status": "preview", "icon": ICON_DEPARTMENTS},
+    {"name": "Agent Activity", "tagline": "What the agents proposed and did",
+     "url": "/agents/", "status": "preview", "icon": ICON_AGENTS},
+    {"name": "ERP Connections", "tagline": "Link your accounting system",
+     "url": "/erp/", "status": "preview", "icon": ICON_ERP},
+    {"name": "Ledger", "tagline": "Chart of accounts, journals, entries",
+     "url": "/admin/accounting/", "status": "live", "icon": ICON_LEDGER},
 ]
+
+
+# Department roster metadata for the org-chart skeleton (scope + the phase the
+# agent ships in). Codes/labels come from SUBSCRIBABLE_DEPARTMENTS.
+_DEPT_META = {
+    "D00": ("Cross-department orchestration, month-end close", "P11"),
+    "D01": ("Vendor bills, payments, withholding tax", "P05"),
+    "D02": ("Customer invoices, receipts, dunning", "P07"),
+    "D03": ("Bank, cash, FX, payment execution", "P08"),
+    "D04": ("Capex, componentisation, depreciation, disposals", "P09"),
+    "D05": ("Manual journal entries, accruals, reconciliations", "P10"),
+    "D06": ("TVA, WHT, IS, IRPP coordination, DGI filings", "P06"),
+    "D07": ("Payroll journal, CNPS, IRPP, certificates", "P16"),
+    "D08": ("Item master, receipts, issues, costing", "P17"),
+    "D09": ("Statutory pack, DGI filings, management reports", "P12"),
+    "D10": ("Class 9, cost centres, project costing", "P13"),
+    "D11": ("Budget, forecast, variance, scenarios", "P14"),
+}
 
 
 # ---------------------------------------------------------------------------
 # Sign-up + tenant switching
 # ---------------------------------------------------------------------------
-
 
 def signup(request):
     """Self-serve sign-up. Creates User + Tenant + Membership atomically
@@ -175,10 +134,8 @@ def signup(request):
         form = SignupForm(request.POST)
         if form.is_valid():
             user = form.save()
-            # Auto-login. specify backend explicitly since multiple are wired.
-            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            # Pin the session to the freshly created tenant so the middleware
-            # doesn't have to fall back to "first membership" on the next request.
+            login(request, user,
+                  backend="django.contrib.auth.backends.ModelBackend")
             new_tenant = getattr(user, "_signup_tenant", None)
             if new_tenant is not None:
                 request.session[SESSION_TENANT_KEY] = new_tenant.slug
@@ -192,15 +149,11 @@ def signup(request):
 @login_required
 @require_POST
 def switch_tenant_view(request, slug):
-    """POST-only endpoint that swaps the active tenant. Bounces back to
-    the referrer (or /workspace/) on success, with a flash message on
-    failure left to a future enhancement."""
+    """POST-only endpoint that swaps the active tenant. Bounces back to the
+    referrer (or /workspace/) on success; silently home on failure."""
     target = switch_tenant(request, slug)
     if target is None:
-        # User tried to switch to a tenant they don't belong to — silently
-        # send them home. (No message framework wired up yet.)
         return redirect("workspace")
-    # Honour the referrer when it's a same-host URL, else workspace.
     referer = request.META.get("HTTP_REFERER", "")
     if referer.startswith(request.build_absolute_uri("/")):
         return HttpResponseRedirect(referer)
@@ -208,667 +161,67 @@ def switch_tenant_view(request, slug):
 
 
 # ---------------------------------------------------------------------------
-# Workspace launcher
+# Workspace home + platform pages
 # ---------------------------------------------------------------------------
 
 @login_required
 def workspace(request):
-    """Module launcher — visible to any authenticated user; doesn't need
-    a tenant (a user with no memberships still sees the page)."""
+    """The home launcher — visible to any authenticated user; works even
+    without a tenant (a user with no memberships still sees it)."""
     tenant_name = request.tenant.name if request.tenant else "EA Ledgers"
-    return render(
-        request,
-        "accounting/workspace.html",
-        {"modules": MODULES, "tenant_name": tenant_name},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Accounting Dashboard
-# ---------------------------------------------------------------------------
-
-def _journal_balance(tenant, journal):
-    """Net balance of all posted lines on this journal's default account.
-    For bank/cash journals this is effectively the bank balance."""
-    if not journal.default_account_id:
-        return Decimal("0")
-    agg = JournalEntryLine.objects.for_tenant(tenant).filter(
-        account_id=journal.default_account_id,
-        entry__state="posted",
-    ).aggregate(d=Sum("debit"), c=Sum("credit"))
-    return (agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))
+    return render(request, "accounting/workspace.html",
+                  {"modules": MODULES, "tenant_name": tenant_name})
 
 
 @login_required
 @tenant_required
-def dashboard(request):
-    t = request.tenant
-    bank_cash_journals = list(
-        Journal.objects.for_tenant(t).filter(type__in=["bank", "cash"], active=True).order_by("code")
-    )
-    for j in bank_cash_journals:
-        j.balance = _journal_balance(t, j)
-        j.tx_count = JournalEntryLine.objects.for_tenant(t).filter(
-            entry__journal=j, entry__state="posted",
-        ).count()
-
-    counters = {
-        "draft_entries": JournalEntry.objects.for_tenant(t).filter(state="draft").count(),
-        "posted_entries": JournalEntry.objects.for_tenant(t).filter(state="posted").count(),
-        "customers": Partner.objects.for_tenant(t).filter(
-            Q(partner_type="customer") | Q(partner_type="both"),
-        ).count(),
-        "suppliers": Partner.objects.for_tenant(t).filter(
-            Q(partner_type="vendor") | Q(partner_type="both"),
-        ).count(),
-        "accounts_count": Account.objects.for_tenant(t).filter(deprecated=False).count(),
-        "fixed_assets": FixedAsset.objects.for_tenant(t).exclude(state="disposed").count(),
-    }
-
-    return render(
-        request,
-        "accounting/dashboard.html",
-        {
-            "bank_cash_journals": bank_cash_journals,
-            "counters": counters,
-            "tenant_name": t.name,
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# Reports
-# ---------------------------------------------------------------------------
-
-@login_required
-@tenant_required
-def trial_balance(request):
-    t = request.tenant
-    accounts = (
-        Account.objects.for_tenant(t).filter(deprecated=False)
-        .annotate(
-            debit_sum=Sum("lines__debit", filter=Q(lines__entry__state="posted") & Q(lines__tenant=t)),
-            credit_sum=Sum("lines__credit", filter=Q(lines__entry__state="posted") & Q(lines__tenant=t)),
-        )
-        .order_by("code")
-    )
+def departments(request):
+    """Org chart of the virtual finance function — the 12 departments, each
+    tenant's subscription, and the phase its agent ships in (skeleton)."""
+    subscribed = set(request.tenant.subscribed_departments())
     rows = []
-    total_d = Decimal("0")
-    total_c = Decimal("0")
-    for a in accounts:
-        d = a.debit_sum or Decimal("0")
-        c = a.credit_sum or Decimal("0")
-        if d == 0 and c == 0:
-            continue
-        rows.append(
-            {
-                "code": a.code,
-                "name": a.name,
-                "type": a.get_type_display(),
-                "debit": d,
-                "credit": c,
-                "balance": d - c,
-            }
-        )
-        total_d += d
-        total_c += c
-    return render(
-        request,
-        "accounting/trial_balance.html",
-        {
-            "rows": rows,
-            "total_debit": total_d,
-            "total_credit": total_c,
-            "balanced": total_d == total_c,
-            "tenant_name": t.name,
-        },
-    )
+    for code, label in SUBSCRIBABLE_DEPARTMENTS:
+        scope, phase = _DEPT_META.get(code, ("", ""))
+        rows.append({
+            "code": code,
+            "label": label,
+            "scope": scope,
+            "phase": phase,
+            "subscribed": code in subscribed,
+        })
+    return render(request, "accounting/departments.html", {
+        "page_name": "Departments",
+        "departments": rows,
+        "n_subscribed": len(subscribed),
+        "n_total": len(rows),
+    })
 
 
 @login_required
 @tenant_required
-def general_ledger(request):
-    t = request.tenant
-    qs = (
-        JournalEntryLine.objects.for_tenant(t).filter(entry__state="posted")
-        .select_related("entry", "entry__journal", "account", "partner")
-        .order_by("-entry__date", "-entry__id", "id")[:500]
+def agent_activity(request):
+    """Recent agent runs for the tenant (skeleton — empty until the agents
+    ship in Phase P05+)."""
+    runs = list(
+        AgentRun.objects.filter(tenant=request.tenant)
+        .order_by("-id")[:50]
     )
-    return render(
-        request,
-        "accounting/general_ledger.html",
-        {"lines": qs, "tenant_name": t.name},
-    )
-
-
-def _aging_buckets(qs, today=None):
-    """Bucket open (unreconciled) lines into 0-30 / 31-60 / 61-90 / >90."""
-    today = today or date.today()
-    buckets = {"current": Decimal("0"), "b30": Decimal("0"), "b60": Decimal("0"),
-               "b90": Decimal("0"), "over": Decimal("0")}
-    per_partner = {}
-    for line in qs.select_related("entry", "partner"):
-        age = (today - line.entry.date).days
-        amount = (line.debit or 0) - (line.credit or 0)
-        if line.partner_id is None:
-            continue
-        pp = per_partner.setdefault(
-            line.partner,
-            {"current": Decimal("0"), "b30": Decimal("0"), "b60": Decimal("0"),
-             "b90": Decimal("0"), "over": Decimal("0"), "total": Decimal("0")},
-        )
-        if age <= 30:
-            pp["current"] += amount; buckets["current"] += amount
-        elif age <= 60:
-            pp["b30"] += amount; buckets["b30"] += amount
-        elif age <= 90:
-            pp["b60"] += amount; buckets["b60"] += amount
-        elif age <= 180:
-            pp["b90"] += amount; buckets["b90"] += amount
-        else:
-            pp["over"] += amount; buckets["over"] += amount
-        pp["total"] += amount
-    rows = [{"partner": p, **vals} for p, vals in per_partner.items() if vals["total"] != 0]
-    rows.sort(key=lambda r: r["total"], reverse=True)
-    return rows, buckets
+    return render(request, "accounting/agent_activity.html", {
+        "page_name": "Agent Activity",
+        "runs": runs,
+    })
 
 
 @login_required
 @tenant_required
-def customer_aging(request):
-    t = request.tenant
-    qs = JournalEntryLine.objects.for_tenant(t).filter(
-        entry__state="posted",
-        account__type="receivable",
-        reconciled=False,
+def erp_connections(request):
+    """The tenant's ERP connections + their health (skeleton — connecting a
+    live Odoo is Phase P03)."""
+    connections = list(
+        ERPConnection.objects.filter(tenant=request.tenant)
+        .order_by("-is_primary", "name")
     )
-    rows, totals = _aging_buckets(qs)
-    return render(
-        request,
-        "accounting/aging.html",
-        {
-            "title": "Customer Aging",
-            "rows": rows,
-            "totals": totals,
-            "partner_kind": "Customer",
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-def supplier_aging(request):
-    t = request.tenant
-    qs = JournalEntryLine.objects.for_tenant(t).filter(
-        entry__state="posted",
-        account__type="payable",
-        reconciled=False,
-    )
-    rows, totals = _aging_buckets(qs)
-    # Payables show as credits → flip signs so the report reads positive
-    for r in rows:
-        for k in ("current", "b30", "b60", "b90", "over", "total"):
-            r[k] = -r[k]
-    for k in ("current", "b30", "b60", "b90", "over"):
-        totals[k] = -totals[k]
-    return render(
-        request,
-        "accounting/aging.html",
-        {
-            "title": "Supplier Aging",
-            "rows": rows,
-            "totals": totals,
-            "partner_kind": "Supplier",
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-def fixed_assets_register(request):
-    t = request.tenant
-    assets = list(FixedAsset.objects.for_tenant(t).order_by("code"))
-    for a in assets:
-        a.computed_total_posted = a.total_posted
-        a.computed_book_value = a.book_value
-    totals = {
-        "cost": sum((a.purchase_cost for a in assets), Decimal("0")),
-        "depreciation": sum((a.computed_total_posted for a in assets), Decimal("0")),
-        "book_value": sum((a.computed_book_value for a in assets), Decimal("0")),
-    }
-    return render(
-        request,
-        "accounting/fixed_assets_register.html",
-        {"assets": assets, "totals": totals, "tenant_name": t.name},
-    )
-
-
-# ---------------------------------------------------------------------------
-# Customer invoicing
-# ---------------------------------------------------------------------------
-
-
-@login_required
-@tenant_required
-def invoice_list(request):
-    """Listing of customer invoices, optionally filtered by state."""
-    t = request.tenant
-    qs = (
-        CustomerInvoice.objects.for_tenant(t)
-        .select_related("partner", "currency", "journal")
-        .order_by("-date", "-id")
-    )
-    state = request.GET.get("state", "")
-    if state in {"draft", "posted", "paid", "cancelled"}:
-        qs = qs.filter(state=state)
-
-    invoices = list(qs[:200])
-
-    # Pre-aggregate totals for the header strip
-    base = CustomerInvoice.objects.for_tenant(t)
-    counts = {
-        "all": base.count(),
-        "draft": base.filter(state="draft").count(),
-        "posted": base.filter(state="posted").count(),
-        "paid": base.filter(state="paid").count(),
-        "cancelled": base.filter(state="cancelled").count(),
-    }
-    outstanding = base.filter(state="posted").aggregate(
-        s=Sum("amount_total"),
-    )["s"] or Decimal("0")
-
-    return render(
-        request,
-        "accounting/invoice_list.html",
-        {
-            "invoices": invoices,
-            "counts": counts,
-            "active_state": state,
-            "outstanding": outstanding,
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-def invoice_detail(request, pk):
-    """Print-ready detail view of one invoice."""
-    t = request.tenant
-    inv = (
-        CustomerInvoice.objects.for_tenant(t)
-        .select_related("partner", "currency", "journal", "tenant",
-                        "journal_entry", "payment_entry")
-        .prefetch_related("lines__account")
-        .get(pk=pk)
-    )
-    # Bank/cash journals available for "Record payment"
-    pay_journals = Journal.objects.for_tenant(t).filter(
-        type__in=("bank", "cash"), active=True,
-    ).order_by("code")
-    return render(
-        request,
-        "accounting/invoice_detail.html",
-        {
-            "inv": inv,
-            "lines": inv.lines.all(),
-            "pay_journals": pay_journals,
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-@require_POST
-def invoice_post(request, pk):
-    """Transition draft → posted (creates the journal entry)."""
-    from django.contrib import messages
-    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
-    try:
-        inv.post()
-        messages.success(request, f"Invoice {inv.number} posted.")
-    except Exception as exc:
-        messages.error(request, f"Could not post invoice: {exc}")
-    return redirect("accounting:invoice_detail", pk=pk)
-
-
-@login_required
-@tenant_required
-@require_POST
-def invoice_record_payment(request, pk):
-    """Transition posted → paid (creates the payment journal entry)."""
-    from django.contrib import messages
-    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
-    journal_id = request.POST.get("journal_id")
-    if not journal_id:
-        messages.error(request, "Pick a bank or cash journal to record the payment.")
-        return redirect("accounting:invoice_detail", pk=pk)
-    try:
-        journal = Journal.objects.for_tenant(request.tenant).get(pk=journal_id)
-        inv.record_payment(journal)
-        messages.success(request, f"Payment recorded for {inv.number}.")
-    except Journal.DoesNotExist:
-        messages.error(request, "Journal not found.")
-    except Exception as exc:
-        messages.error(request, f"Could not record payment: {exc}")
-    return redirect("accounting:invoice_detail", pk=pk)
-
-
-@login_required
-@tenant_required
-@require_POST
-def invoice_cancel(request, pk):
-    """Transition draft → cancelled."""
-    from django.contrib import messages
-    inv = CustomerInvoice.objects.for_tenant(request.tenant).get(pk=pk)
-    try:
-        inv.cancel()
-        messages.success(request, f"Invoice cancelled.")
-    except Exception as exc:
-        messages.error(request, f"Could not cancel: {exc}")
-    return redirect("accounting:invoice_detail", pk=pk)
-
-
-# ---------------------------------------------------------------------------
-# Supplier bills (Phase 1.2) — mirror of customer invoicing views
-# ---------------------------------------------------------------------------
-
-
-@login_required
-@tenant_required
-def bill_list(request):
-    """Listing of supplier bills, optionally filtered by state."""
-    t = request.tenant
-    qs = (
-        SupplierBill.objects.for_tenant(t)
-        .select_related("partner", "currency", "journal")
-        .order_by("-date", "-id")
-    )
-    state = request.GET.get("state", "")
-    if state in {"draft", "posted", "paid", "cancelled"}:
-        qs = qs.filter(state=state)
-
-    bills = list(qs[:200])
-
-    base = SupplierBill.objects.for_tenant(t)
-    counts = {
-        "all": base.count(),
-        "draft": base.filter(state="draft").count(),
-        "posted": base.filter(state="posted").count(),
-        "paid": base.filter(state="paid").count(),
-        "cancelled": base.filter(state="cancelled").count(),
-    }
-    outstanding = base.filter(state="posted").aggregate(
-        s=Sum("amount_total"),
-    )["s"] or Decimal("0")
-
-    return render(
-        request,
-        "accounting/bill_list.html",
-        {
-            "bills": bills,
-            "counts": counts,
-            "active_state": state,
-            "outstanding": outstanding,
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-def bill_detail(request, pk):
-    """Detail view of one bill."""
-    t = request.tenant
-    bill = (
-        SupplierBill.objects.for_tenant(t)
-        .select_related("partner", "currency", "journal", "tenant",
-                        "journal_entry", "payment_entry")
-        .prefetch_related("lines__account")
-        .get(pk=pk)
-    )
-    pay_journals = Journal.objects.for_tenant(t).filter(
-        type__in=("bank", "cash"), active=True,
-    ).order_by("code")
-    return render(
-        request,
-        "accounting/bill_detail.html",
-        {
-            "bill": bill,
-            "lines": bill.lines.all(),
-            "pay_journals": pay_journals,
-            "tenant_name": t.name,
-        },
-    )
-
-
-@login_required
-@tenant_required
-@require_POST
-def bill_post(request, pk):
-    """Transition draft → posted."""
-    from django.contrib import messages
-    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
-    try:
-        bill.post()
-        messages.success(request, f"Bill {bill.number} posted.")
-    except Exception as exc:
-        messages.error(request, f"Could not post bill: {exc}")
-    return redirect("accounting:bill_detail", pk=pk)
-
-
-@login_required
-@tenant_required
-@require_POST
-def bill_record_payment(request, pk):
-    """Transition posted → paid."""
-    from django.contrib import messages
-    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
-    journal_id = request.POST.get("journal_id")
-    if not journal_id:
-        messages.error(request, "Pick a bank or cash journal to record the payment.")
-        return redirect("accounting:bill_detail", pk=pk)
-    try:
-        journal = Journal.objects.for_tenant(request.tenant).get(pk=journal_id)
-        bill.record_payment(journal)
-        messages.success(request, f"Payment recorded for {bill.number}.")
-    except Journal.DoesNotExist:
-        messages.error(request, "Journal not found.")
-    except Exception as exc:
-        messages.error(request, f"Could not record payment: {exc}")
-    return redirect("accounting:bill_detail", pk=pk)
-
-
-@login_required
-@tenant_required
-@require_POST
-def bill_cancel(request, pk):
-    """Transition draft → cancelled."""
-    from django.contrib import messages
-    bill = SupplierBill.objects.for_tenant(request.tenant).get(pk=pk)
-    try:
-        bill.cancel()
-        messages.success(request, "Bill cancelled.")
-    except Exception as exc:
-        messages.error(request, f"Could not cancel: {exc}")
-    return redirect("accounting:bill_detail", pk=pk)
-
-
-# ---------------------------------------------------------------------------
-# Bank reconciliation (Phase 1.3)
-# ---------------------------------------------------------------------------
-
-
-@login_required
-@tenant_required
-def bank_statement_list(request):
-    """Listing of bank statements per tenant."""
-    t = request.tenant
-    statements = list(
-        BankStatement.objects.for_tenant(t)
-        .select_related("journal")
-        .order_by("-period_end", "-id")[:200]
-    )
-    # Attach computed counts for the table
-    for s in statements:
-        s.done = s.reconciled_lines_count
-        s.total = s.total_lines_count
-    journals = (
-        Journal.objects.for_tenant(t)
-        .filter(type__in=("bank", "cash"), active=True)
-        .order_by("code")
-    )
-    return render(
-        request,
-        "accounting/bank_statement_list.html",
-        {"statements": statements, "journals": journals, "tenant_name": t.name},
-    )
-
-
-@login_required
-@tenant_required
-@require_POST
-def bank_statement_import(request):
-    """Create a new BankStatement from a CSV paste/upload."""
-    from django.contrib import messages
-    from .models import parse_bank_csv
-
-    t = request.tenant
-    journal_id = request.POST.get("journal_id")
-    period_start = request.POST.get("period_start")
-    period_end = request.POST.get("period_end")
-    opening_balance = request.POST.get("opening_balance") or "0"
-    closing_balance = request.POST.get("closing_balance") or "0"
-    csv_text = request.POST.get("csv_text") or ""
-
-    if not (journal_id and period_start and period_end and csv_text.strip()):
-        messages.error(request, "Pick a journal, dates, and paste CSV data.")
-        return redirect("accounting:bank_statement_list")
-
-    try:
-        journal = Journal.objects.for_tenant(t).get(pk=journal_id)
-    except Journal.DoesNotExist:
-        messages.error(request, "Journal not found.")
-        return redirect("accounting:bank_statement_list")
-
-    try:
-        rows = parse_bank_csv(csv_text)
-    except ValueError as exc:
-        messages.error(request, f"CSV parse failed: {exc}")
-        return redirect("accounting:bank_statement_list")
-
-    ok_rows = [r for r, err in rows if err is None]
-    errs = [err for r, err in rows if err is not None]
-
-    if not ok_rows:
-        messages.error(request, "No valid rows in the CSV. Errors: " + "; ".join(errs[:5]))
-        return redirect("accounting:bank_statement_list")
-
-    stmt = BankStatement.objects.create(
-        tenant=t,
-        journal=journal,
-        period_start=period_start,
-        period_end=period_end,
-        opening_balance=Decimal(opening_balance or "0"),
-        closing_balance=Decimal(closing_balance or "0"),
-        imported_by=request.user,
-    )
-    for i, data in enumerate(ok_rows, start=1):
-        BankStatementLine.objects.create(
-            tenant=t,
-            statement=stmt,
-            sequence=i * 10,
-            **data,
-        )
-    stmt.update_state()
-
-    if errs:
-        messages.warning(
-            request,
-            f"Imported {len(ok_rows)} lines, skipped {len(errs)} (first errors: "
-            + "; ".join(errs[:3]) + ").",
-        )
-    else:
-        messages.success(request, f"Imported {len(ok_rows)} lines.")
-    return redirect("accounting:bank_statement_detail", pk=stmt.pk)
-
-
-@login_required
-@tenant_required
-def bank_statement_detail(request, pk):
-    """Detail view with all lines + per-line match/post UI."""
-    t = request.tenant
-    stmt = (
-        BankStatement.objects.for_tenant(t)
-        .select_related("journal", "journal__default_account")
-        .get(pk=pk)
-    )
-    lines = list(
-        stmt.lines.select_related("matched_entry_line__entry",
-                                  "matched_entry_line__account",
-                                  "generated_entry__journal")
-        .order_by("sequence", "transaction_date", "id")
-    )
-    # Pre-compute candidate counts for unmatched lines so the template
-    # can show "(3 candidates)" hints without re-running the query each
-    # render.
-    for ln in lines:
-        if ln.state == "unmatched":
-            ln.candidate_count = ln.candidate_entry_lines().count()
-        else:
-            ln.candidate_count = 0
-    return render(
-        request,
-        "accounting/bank_statement_detail.html",
-        {"stmt": stmt, "lines": lines, "tenant_name": t.name},
-    )
-
-
-@login_required
-@tenant_required
-def bank_line_match(request, pk):
-    """Show candidate JE lines for one bank line, and accept a POSTed match."""
-    from django.contrib import messages
-
-    t = request.tenant
-    line = (
-        BankStatementLine.objects.for_tenant(t)
-        .select_related("statement", "statement__journal")
-        .get(pk=pk)
-    )
-    if request.method == "POST":
-        target_id = request.POST.get("entry_line_id")
-        try:
-            target = JournalEntryLine.objects.for_tenant(t).get(pk=target_id)
-            line.match_to(target, user=request.user)
-            messages.success(request, "Line matched.")
-        except JournalEntryLine.DoesNotExist:
-            messages.error(request, "Entry line not found.")
-        except Exception as exc:
-            messages.error(request, f"Could not match: {exc}")
-        return redirect("accounting:bank_statement_detail", pk=line.statement_id)
-
-    # GET: render the candidate picker
-    candidates = list(line.candidate_entry_lines())
-    return render(
-        request,
-        "accounting/bank_line_match.html",
-        {"line": line, "candidates": candidates, "tenant_name": t.name},
-    )
-
-
-@login_required
-@tenant_required
-@require_POST
-def bank_line_unmatch(request, pk):
-    from django.contrib import messages
-    line = BankStatementLine.objects.for_tenant(request.tenant).get(pk=pk)
-    try:
-        line.unmatch()
-        messages.success(request, "Match undone.")
-    except Exception as exc:
-        messages.error(request, f"Could not unmatch: {exc}")
-    return redirect("accounting:bank_statement_detail", pk=line.statement_id)
+    return render(request, "accounting/erp_connections.html", {
+        "page_name": "ERP Connections",
+        "connections": connections,
+    })

@@ -1,0 +1,64 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}Agent Activity · EA Ledgers{% endblock %}
+
+{% block content %}
+<section class="aa">
+  <header class="aa-head">
+    <div class="aa-eyebrow">Audit trail</div>
+    <h1 class="aa-title">Agent Activity</h1>
+    <p class="aa-lede">Every proposal and action a department agent takes is
+      recorded here — what it did, its confidence, and who approved it.</p>
+  </header>
+
+  {% if runs %}
+    <table class="aa-table">
+      <thead>
+        <tr><th>Department</th><th>Task</th><th>Status</th><th>Confidence</th></tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+          <tr>
+            <td>{{ r.get_department_display }}</td>
+            <td class="aa-task">{{ r.task }}</td>
+            <td><span class="aa-status aa-status--{{ r.status }}">{{ r.get_status_display }}</span></td>
+            <td class="aa-conf">{% if r.confidence is not None %}{{ r.confidence }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="aa-empty">
+      <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.2"/></svg>
+      <h2>No agent runs yet</h2>
+      <p>Department agents start working from <strong>Phase P05</strong> (AP first).
+         When they do, every classification, proposal, and posting will appear
+         here with its full audit trail and confidence score.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .aa { --ink:#0a0a0a; --muted:#737373; --hair:#e5e5e5; --brand:#0d9488; color:var(--ink); }
+  .aa-head { padding-bottom:1.3rem; border-bottom:1px solid var(--hair); }
+  .aa-eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); font-weight:600; }
+  .aa-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .2rem; }
+  .aa-lede { color:var(--muted); max-width:58ch; font-size:.95rem; line-height:1.55; }
+  .aa-table { width:100%; border-collapse:collapse; margin-top:1.4rem; font-size:.9rem; }
+  .aa-table th { text-align:left; font-size:.7rem; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:.5rem .7rem; border-bottom:1px solid var(--hair); }
+  .aa-table td { padding:.65rem .7rem; border-bottom:1px solid #f5f5f5; }
+  .aa-task { font-family:"Geist Mono", ui-monospace, monospace; font-size:.82rem; }
+  .aa-status { font-size:.7rem; font-weight:600; padding:.15rem .5rem; border-radius:999px; background:#f5f5f5; color:#525252; }
+  .aa-status--executed, .aa-status--approved { background:#d1fae5; color:#047857; }
+  .aa-status--proposed { background:#fef3c7; color:#b45309; }
+  .aa-status--rejected, .aa-status--failed { background:#fee2e2; color:#b91c1c; }
+  .aa-conf { font-family:"Geist Mono", ui-monospace, monospace; }
+  .aa-empty { text-align:center; padding:4.5rem 1rem; color:var(--muted); }
+  .aa-empty svg { color:#d4d4d4; margin-bottom:1rem; }
+  .aa-empty h2 { font-size:1.1rem; color:#404040; margin:0 0 .5rem; }
+  .aa-empty p { max-width:46ch; margin:0 auto; line-height:1.6; }
+  .aa-empty strong { color:var(--ink); }
+  @media (max-width:640px){ .aa-title{font-size:1.7rem;} }
+</style>
+{% endblock %}

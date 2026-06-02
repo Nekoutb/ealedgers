@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Apps · EA Ledgers</title>
+<title>Workspace · EA Ledgers</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,118 +13,93 @@
 <link rel="stylesheet" href="{% static 'accounting/main.css' %}">
 </head>
 
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen flex flex-col bg-neutral-50">
 
 <!-- ============ TOP BAR ============ -->
 <header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
   <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
-
-    <!-- Logo + product -->
     <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
       <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
-        <rect width="56" height="8"/>
-        <rect y="18" width="36" height="8"/>
-        <rect y="36" width="56" height="8"/>
+        <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
       </svg>
       <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
     </a>
-
-    <!-- Right side: tenant + user -->
     <div class="flex items-center gap-2">
-      <div class="hidden sm:block">
-        {% include "accounting/_tenant_switcher.html" %}
-      </div>
+      <div class="hidden sm:block">{% include "accounting/_tenant_switcher.html" %}</div>
       <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
       <form method="post" action="/admin/logout/">
         {% csrf_token %}
         <button type="submit" class="btn btn-ghost text-xs">Sign out</button>
       </form>
     </div>
-
   </div>
 </header>
 
 <!-- ============ STAGE ============ -->
 <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-12">
 
-  <!-- Heading -->
   <section class="mb-10">
     <p class="text-eyebrow mb-2">Welcome back, {{ user.username }}</p>
-    <h1 class="h-display">Apps</h1>
-    <p class="text-sm text-neutral-500 mt-2">Open a module to start working.</p>
+    <h1 class="h-display">Your virtual finance function</h1>
+    <p class="text-sm text-neutral-500 mt-2 max-w-2xl">
+      EA Ledgers is an intelligent accounting agent for <strong>{{ tenant_name }}</strong> —
+      a team of departmental agents that read your framework rules and act on your ERP.
+      <span class="text-neutral-400">“Preview” surfaces are wired and fill up as each department’s agent ships.</span>
+    </p>
   </section>
 
-  <!-- App grid -->
-  <section aria-label="Modules">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
+  <section aria-label="Workspace">
+    <div class="ws-grid">
       {% for mod in modules %}
-        {% if mod.url %}
-        <a href="{{ mod.url }}"
-           class="app-card-live group card p-5 flex flex-col gap-3 hover:border-neutral-300 transition cursor-pointer"
-           style="--card-hover-shadow: 0 8px 24px -8px rgb(13 148 136 / 0.20);">
-          <div class="flex items-start justify-between">
-            <div class="w-11 h-11 rounded-md flex items-center justify-center"
-                 style="background: var(--color-brand);">
-              <span class="text-white">{{ mod.icon|safe }}</span>
-            </div>
-            <span class="pill pill-success pill-live">Live</span>
+        <a href="{{ mod.url }}" class="ws-card group">
+          <div class="ws-card-top">
+            <span class="ws-icon">{{ mod.icon|safe }}</span>
+            {% if mod.status == "live" %}
+              <span class="pill pill-success">Live</span>
+            {% else %}
+              <span class="ws-pill-preview">Preview</span>
+            {% endif %}
           </div>
-          <div>
-            <div class="text-base font-semibold text-neutral-950">{{ mod.name }}</div>
-            <div class="text-sm text-neutral-500 mt-0.5">{{ mod.tagline }}</div>
+          <div class="ws-card-body">
+            <div class="ws-card-name">{{ mod.name }}</div>
+            <div class="ws-card-tag">{{ mod.tagline }}</div>
           </div>
-          <div class="mt-auto pt-3 border-t border-neutral-100 flex items-center justify-between text-xs">
-            <span class="text-neutral-500">Open module</span>
-            <span class="text-neutral-400 group-hover:text-neutral-700 group-hover:translate-x-0.5 transition">→</span>
+          <div class="ws-card-foot">
+            <span>Open</span>
+            <span class="ws-arrow">→</span>
           </div>
         </a>
-        {% else %}
-        <div class="app-card-soon card p-5 flex flex-col gap-3 opacity-70" aria-disabled="true">
-          <div class="flex items-start justify-between">
-            <div class="w-11 h-11 rounded-md flex items-center justify-center bg-neutral-100">
-              <span class="text-neutral-400">{{ mod.icon|safe }}</span>
-            </div>
-            <span class="pill">Soon</span>
-          </div>
-          <div>
-            <div class="text-base font-semibold text-neutral-700">{{ mod.name }}</div>
-            <div class="text-sm text-neutral-500 mt-0.5">{{ mod.tagline }}</div>
-          </div>
-          <div class="mt-auto pt-3 border-t border-neutral-100 flex items-center justify-between text-xs">
-            <span class="text-neutral-400">Coming soon</span>
-            <span class="text-neutral-300">—</span>
-          </div>
-        </div>
-        {% endif %}
       {% endfor %}
-
     </div>
   </section>
 
 </main>
 
-<!-- ============ FOOTER ============ -->
 <footer class="border-t border-neutral-200 bg-white">
   <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
     <div>© Elite Advisors · EA Ledgers</div>
-    <div class="text-mono">v0.2</div>
+    <div class="text-mono">v0.3 · SYSCOHADA · XAF</div>
   </div>
 </footer>
 
 <style>
-  /* Reset the colored icon tiles: each module's SVG comes with its own
-     <rect width="32" height="32" fill="HEX">. We want them all to render
-     white on the brand-colored container instead, so override fill. */
-  .app-card-live .w-11 svg rect:first-of-type { fill: transparent !important; }
-  .app-card-live .w-11 svg :not(rect:first-of-type) { fill: white; stroke: white; }
-  .app-card-soon .w-11 svg rect:first-of-type { fill: transparent !important; }
-  .app-card-soon .w-11 svg :not(rect:first-of-type) { fill: theme(--color-neutral-400); stroke: theme(--color-neutral-400); }
-  .app-card-live { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
-  .app-card-live:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px -8px rgb(13 148 136 / 0.25), 0 2px 4px rgb(0 0 0 / 0.04);
-  }
+  .ws-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:1rem; }
+  .ws-card { display:flex; flex-direction:column; gap:.85rem; background:#fff;
+             border:1px solid #e5e5e5; border-radius:16px; padding:1.25rem;
+             text-decoration:none; color:inherit; transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+  .ws-card:hover { transform:translateY(-2px); border-color:#d4d4d4;
+                   box-shadow:0 10px 28px -12px rgba(0,0,0,.22); }
+  .ws-card-top { display:flex; align-items:center; justify-content:space-between; }
+  .ws-icon svg { width:46px; height:46px; display:block; }
+  .ws-pill-preview { font-size:.66rem; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+                     color:#9333ea; background:#f3e8ff; padding:.2rem .55rem; border-radius:999px; }
+  .ws-card-name { font-size:1.05rem; font-weight:650; letter-spacing:-.01em; color:#0a0a0a; }
+  .ws-card-tag { font-size:.85rem; color:#737373; margin-top:.15rem; line-height:1.45; }
+  .ws-card-foot { margin-top:auto; padding-top:.75rem; border-top:1px solid #f5f5f5;
+                  display:flex; align-items:center; justify-content:space-between;
+                  font-size:.78rem; color:#737373; }
+  .ws-arrow { color:#a3a3a3; transition:transform .16s ease, color .16s ease; }
+  .ws-card:hover .ws-arrow { color:#404040; transform:translateX(2px); }
 </style>
 </body>
 </html>

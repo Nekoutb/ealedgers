@@ -4,7 +4,14 @@ from django.contrib import admin
 from django.contrib.auth.views import LoginView
 from django.urls import include, path
 
-from accounting.views import signup, switch_tenant_view, workspace
+from accounting.views import (
+    agent_activity,
+    departments,
+    erp_connections,
+    signup,
+    switch_tenant_view,
+    workspace,
+)
 
 
 urlpatterns = [
@@ -21,11 +28,15 @@ urlpatterns = [
     path('signup/', signup, name='signup'),
     # Tenant switcher (POST-only — flips the active tenant in session)
     path('tenant/switch/<slug:slug>/', switch_tenant_view, name='switch_tenant'),
-    # Post-login module launcher
+    # Post-login home launcher
     path('workspace/', workspace, name='workspace'),
-    # The Accounting module (custom views — dashboard + reports)
-    path('accounting/', include('accounting.urls', namespace='accounting')),
-    # Knowledge layer (Step 14: retrieval API; Step 23: rule explorer UI)
+    # Platform pages — the virtual-finance-function vision (read-only skeletons
+    # today; the agents fill them from Phase P03/P05+). The accounting data
+    # layer itself is reached via the Django admin ("Ledger").
+    path('departments/', departments, name='departments'),
+    path('agents/', agent_activity, name='agent_activity'),
+    path('erp/', erp_connections, name='erp_connections'),
+    # Knowledge layer (retrieval API + rule explorer + tenant procedures)
     path('knowledge/', include('knowledge.urls', namespace='knowledge')),
     # Django admin houses the CRUD UIs that the module nav links into
     path('admin/', admin.site.urls),

@@ -227,91 +227,6 @@ class TenantContextMiddlewareTests(TestCase):
         self.assertEqual(req.tenant, self.acme)
 
 
-class TenantAwareViewTests(TestCase):
-    """Phase 0.2b: views use Model.objects.for_tenant(request.tenant) and
-    show only the current tenant's data, never the other tenant's."""
-
-    @classmethod
-    def setUpTestData(cls):
-        User = get_user_model()
-        cls.xaf = Currency.objects.create(code="XAF", name="CFA Franc", decimal_places=0)
-        cls.alice = User.objects.create_user("alice", "alice@a.test", "x")
-        cls.bob = User.objects.create_user("bob", "bob@b.test", "x")
-        cls.acme = _make_tenant("acme", currency=cls.xaf, owner=cls.alice)
-        cls.beta = _make_tenant("beta", currency=cls.xaf, owner=cls.bob, business_type="goods")
-        Membership.objects.create(user=cls.alice, tenant=cls.acme, role="owner")
-        Membership.objects.create(user=cls.bob, tenant=cls.beta, role="owner")
-
-        # Each tenant gets one identifiable account that the OTHER tenant
-        # must never see.
-        Account.objects.create(
-            tenant=cls.acme, code="ACME-CASH", name="Acme Cash Account",
-            type="asset_cash",
-        )
-        Account.objects.create(
-            tenant=cls.beta, code="BETA-CASH", name="Beta Cash Account",
-            type="asset_cash",
-        )
-
-    def test_alice_dashboard_shows_only_acme_data(self):
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/")
-        self.assertEqual(r.status_code, 200)
-        # Alice's tenant context is acme → dashboard counts must reflect acme only
-        # (1 account, not 2 across both tenants).
-        # We assert against the rendered counters via the response context.
-        counters = r.context["counters"]
-        self.assertEqual(counters["accounts_count"], 1)
-        self.assertEqual(r.context["tenant_name"], "Acme SARL")
-
-    def test_bob_dashboard_shows_only_beta_data(self):
-        self.client.force_login(self.bob)
-        r = self.client.get("/accounting/")
-        self.assertEqual(r.status_code, 200)
-        counters = r.context["counters"]
-        self.assertEqual(counters["accounts_count"], 1)
-        self.assertEqual(r.context["tenant_name"], "Beta SARL")
-
-    def test_trial_balance_isolated_by_tenant(self):
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/reports/trial-balance/")
-        self.assertEqual(r.status_code, 200)
-        # Neither tenant has posted entries yet, so 0 rows is expected.
-        # Important assertion: tenant_name is Acme (not Beta).
-        self.assertEqual(r.context["tenant_name"], "Acme SARL")
-
-    def test_fixed_assets_register_isolated_by_tenant(self):
-        from accounting.models import Journal as J, FixedAsset
-        # Give Acme one fixed asset; Beta gets none.
-        j = J.objects.create(tenant=self.acme, code="OD", name="Misc", type="general")
-        a = Account.objects.create(
-            tenant=self.acme, code="ACME-244", name="Office equipment", type="asset_fixed",
-        )
-        b = Account.objects.create(
-            tenant=self.acme, code="ACME-2844", name="Accum depr office equipment",
-            type="asset_fixed",
-        )
-        c = Account.objects.create(
-            tenant=self.acme, code="ACME-6813", name="Depr expense", type="expense_depreciation",
-        )
-        FixedAsset.objects.create(
-            tenant=self.acme, code="ACME-A1", name="Laptop",
-            purchase_date=date.today(), in_service_date=date.today(),
-            purchase_cost=Decimal("1000000"), useful_life_months=36,
-            asset_account=a, accumulated_depreciation_account=b,
-            depreciation_expense_account=c, depreciation_journal=j,
-        )
-
-        # Alice (acme) sees 1 asset; Bob (beta) sees 0.
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/reports/fixed-assets-register/")
-        self.assertEqual(len(r.context["assets"]), 1)
-
-        self.client.force_login(self.bob)
-        r = self.client.get("/accounting/reports/fixed-assets-register/")
-        self.assertEqual(len(r.context["assets"]), 0)
-
-
 class TenantAwareAdminTests(TestCase):
     """Phase 0.2b: Django admin list views are filtered to request.tenant."""
 
@@ -843,43 +758,6 @@ class CustomerInvoiceTests(TestCase):
 
     # ----- views ----------------------------------------------------------
 
-    def test_invoice_list_view_renders(self):
-        self._make_invoice()
-        self._make_invoice()
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/invoices/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.context["invoices"]), 2)
-
-    def test_invoice_detail_view_renders(self):
-        inv = self._make_invoice()
-        self.client.force_login(self.alice)
-        r = self.client.get(f"/accounting/invoices/{inv.id}/")
-        self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Acme Customer")
-        self.assertContains(r, "Consulting services")
-
-    def test_invoice_post_view_transitions_to_posted(self):
-        inv = self._make_invoice()
-        self.client.force_login(self.alice)
-        r = self.client.post(f"/accounting/invoices/{inv.id}/post/")
-        self.assertEqual(r.status_code, 302)
-        inv.refresh_from_db()
-        self.assertEqual(inv.state, "posted")
-
-    def test_invoice_payment_view_transitions_to_paid(self):
-        inv = self._make_invoice()
-        inv.post()
-        self.client.force_login(self.alice)
-        r = self.client.post(
-            f"/accounting/invoices/{inv.id}/pay/",
-            {"journal_id": self.bank.id},
-        )
-        self.assertEqual(r.status_code, 302)
-        inv.refresh_from_db()
-        self.assertEqual(inv.state, "paid")
-
-
 class CustomerInvoiceTenantIsolationTests(TestCase):
     """Invoices belong to their tenant; data must not leak across."""
 
@@ -915,13 +793,6 @@ class CustomerInvoiceTenantIsolationTests(TestCase):
             CustomerInvoice.objects.for_tenant(self.acme).first().partner.name,
             "ACME-CUST",
         )
-
-    def test_invoice_list_view_filters_by_tenant(self):
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/invoices/")
-        body = r.content.decode("utf-8", errors="replace")
-        self.assertIn("ACME-CUST", body)
-        self.assertNotIn("BETA-CUST", body)
 
     def test_admin_invoice_list_filters_by_tenant(self):
         self.client.force_login(self.bob)
@@ -1119,42 +990,6 @@ class SupplierBillTests(TestCase):
 
     # ----- views ----------------------------------------------------------
 
-    def test_bill_list_renders(self):
-        self._make_bill()
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/bills/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.context["bills"]), 1)
-
-    def test_bill_detail_renders(self):
-        bill = self._make_bill()
-        self.client.force_login(self.alice)
-        r = self.client.get(f"/accounting/bills/{bill.id}/")
-        self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Acme Vendor")
-        self.assertContains(r, "Office supplies")
-
-    def test_bill_post_view_transitions(self):
-        bill = self._make_bill()
-        self.client.force_login(self.alice)
-        r = self.client.post(f"/accounting/bills/{bill.id}/post/")
-        self.assertEqual(r.status_code, 302)
-        bill.refresh_from_db()
-        self.assertEqual(bill.state, "posted")
-
-    def test_bill_payment_view_transitions(self):
-        bill = self._make_bill()
-        bill.post()
-        self.client.force_login(self.alice)
-        r = self.client.post(
-            f"/accounting/bills/{bill.id}/pay/",
-            {"journal_id": self.bank.id},
-        )
-        self.assertEqual(r.status_code, 302)
-        bill.refresh_from_db()
-        self.assertEqual(bill.state, "paid")
-
-
 class SupplierBillTenantIsolationTests(TestCase):
     """Bills are tenant-scoped — no cross-tenant leakage."""
 
@@ -1186,13 +1021,6 @@ class SupplierBillTenantIsolationTests(TestCase):
     def test_for_tenant_filters(self):
         self.assertEqual(SupplierBill.objects.for_tenant(self.acme).count(), 1)
         self.assertEqual(SupplierBill.objects.for_tenant(self.beta).count(), 1)
-
-    def test_bill_list_view_filters_by_tenant(self):
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/bills/")
-        body = r.content.decode("utf-8", errors="replace")
-        self.assertIn("ACME-VEND", body)
-        self.assertNotIn("BETA-VEND", body)
 
     def test_bill_number_unique_within_tenant_but_not_across(self):
         b_a = SupplierBill.objects.filter(tenant=self.acme).first()
@@ -1502,77 +1330,6 @@ class BankReconciliationTests(TestCase):
 
     # --- views ------------------------------------------------------------
 
-    def test_statement_list_view_renders(self):
-        self._make_statement()
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/bank/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.context["statements"]), 1)
-
-    def test_statement_detail_view_renders(self):
-        stmt = self._make_statement()
-        BankStatementLine.objects.create(
-            tenant=self.tenant, statement=stmt, sequence=10,
-            transaction_date=date(2026, 5, 11),
-            description="Some wire", amount=Decimal("50000"),
-        )
-        self.client.force_login(self.alice)
-        r = self.client.get(f"/accounting/bank/{stmt.id}/")
-        self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Some wire")
-
-    def test_import_view_creates_statement_and_lines(self):
-        self.client.force_login(self.alice)
-        csv = (
-            "date,description,amount\n"
-            "2026-05-10,Wire in,50000\n"
-            "2026-05-11,Bank fee,-2500\n"
-        )
-        r = self.client.post("/accounting/bank/import/", {
-            "journal_id": self.bank.id,
-            "period_start": "2026-05-01",
-            "period_end": "2026-05-31",
-            "opening_balance": "0",
-            "closing_balance": "47500",
-            "csv_text": csv,
-        })
-        self.assertEqual(r.status_code, 302)
-        stmt = BankStatement.objects.for_tenant(self.tenant).first()
-        self.assertEqual(stmt.lines.count(), 2)
-        self.assertEqual(stmt.computed_closing, Decimal("47500"))
-
-    def test_match_view_get_lists_candidates(self):
-        self._post_je(Decimal("50000"))
-        stmt = self._make_statement()
-        line = BankStatementLine.objects.create(
-            tenant=self.tenant, statement=stmt, sequence=10,
-            transaction_date=date(2026, 5, 11),
-            description="Wire", amount=Decimal("50000"),
-        )
-        self.client.force_login(self.alice)
-        r = self.client.get(f"/accounting/bank/line/{line.id}/match/")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(len(r.context["candidates"]), 1)
-
-    def test_match_view_post_performs_match(self):
-        je = self._post_je(Decimal("50000"))
-        stmt = self._make_statement()
-        line = BankStatementLine.objects.create(
-            tenant=self.tenant, statement=stmt, sequence=10,
-            transaction_date=date(2026, 5, 11),
-            description="Wire", amount=Decimal("50000"),
-        )
-        target = je.lines.get(account=self.acct_bank)
-        self.client.force_login(self.alice)
-        r = self.client.post(
-            f"/accounting/bank/line/{line.id}/match/",
-            {"entry_line_id": target.id},
-        )
-        self.assertEqual(r.status_code, 302)
-        line.refresh_from_db()
-        self.assertEqual(line.state, "matched")
-
-
 class BankStatementTenantIsolationTests(TestCase):
     """Bank statements are tenant-scoped."""
 
@@ -1601,18 +1358,6 @@ class BankStatementTenantIsolationTests(TestCase):
     def test_for_tenant_filters(self):
         self.assertEqual(BankStatement.objects.for_tenant(self.acme).count(), 1)
         self.assertEqual(BankStatement.objects.for_tenant(self.beta).count(), 1)
-
-    def test_list_view_filters_by_tenant(self):
-        self.client.force_login(self.alice)
-        r = self.client.get("/accounting/bank/")
-        self.assertEqual(len(r.context["statements"]), 1)
-        self.assertEqual(r.context["statements"][0].tenant, self.acme)
-
-
-# ---------------------------------------------------------------------------
-# Step 4 — ensure_admin management command (R4)
-# ---------------------------------------------------------------------------
-
 
 class EnsureAdminCommandTests(TestCase):
     """The `ensure_admin` management command must keep R4 honest:
@@ -2369,3 +2114,69 @@ class DjangoQConfigTests(TestCase):
         self.assertEqual(OrmQ.objects.count(), 0)
         self.assertEqual(Task.objects.count(), 0)
         self.assertEqual(Schedule.objects.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# Post-pivot platform shell (workspace home + department/agent/ERP skeletons)
+# ---------------------------------------------------------------------------
+
+
+class PlatformShellViewTests(TestCase):
+    """The reframed shell: home launcher + the read-only platform pages that
+    present the virtual-finance-function vision. (The v1 manual UI was retired.)"""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(
+            "shell_u", "s@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(
+            code="XAF", name="CFA Franc", decimal_places=0)
+        cls.acme = Tenant.objects.create(
+            slug="shell-acme", name="Shell Acme", currency=cls.xaf, owner=cls.user)
+        Membership.objects.create(user=cls.user, tenant=cls.acme, role="owner")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_workspace_presents_the_vision(self):
+        r = self.client.get("/workspace/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "virtual finance function")
+        self.assertContains(r, "Knowledge Base")
+        self.assertContains(r, "Departments")
+        self.assertContains(r, "ERP Connections")
+
+    def test_departments_lists_all_twelve(self):
+        r = self.client.get("/departments/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["n_total"], 12)
+        self.assertContains(r, "Accounts Payable")
+
+    def test_departments_marks_subscription(self):
+        TenantDepartmentSubscription.objects.create(
+            tenant=self.acme, department="D01", active=True)
+        r = self.client.get("/departments/")
+        self.assertEqual(r.context["n_subscribed"], 1)
+
+    def test_agent_activity_empty_state(self):
+        r = self.client.get("/agents/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "No agent runs yet")
+
+    def test_erp_connections_empty_state(self):
+        r = self.client.get("/erp/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "No ERP connected yet")
+
+    def test_platform_pages_require_login(self):
+        self.client.logout()
+        for path in ("/departments/", "/agents/", "/erp/"):
+            self.assertEqual(self.client.get(path).status_code, 302)
+
+    def test_platform_pages_require_tenant(self):
+        orphan = get_user_model().objects.create_user(
+            "shell_orphan", "o2@a.test", "pw123456")
+        self.client.force_login(orphan)
+        resp = self.client.get("/departments/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/workspace/", resp["Location"])

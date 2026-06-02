@@ -1,0 +1,66 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}Departments · EA Ledgers{% endblock %}
+
+{% block content %}
+<section class="dept">
+  <header class="dept-head">
+    <div class="dept-eyebrow">Virtual finance function</div>
+    <h1 class="dept-title">Departments</h1>
+    <p class="dept-lede">Your finance team as autonomous agents — each reads the
+      framework rules and acts on your ERP. Subscribe a department to staff it.
+      <strong>{{ n_subscribed }} of {{ n_total }}</strong> active.</p>
+  </header>
+
+  <ul class="dept-list">
+    {% for d in departments %}
+      <li class="dept-card {% if d.subscribed %}is-on{% endif %}">
+        <div class="dept-card-top">
+          <span class="dept-code">{{ d.code }}</span>
+          {% if d.subscribed %}
+            <span class="dept-badge dept-badge--on">Subscribed</span>
+          {% else %}
+            <span class="dept-badge dept-badge--off">Available</span>
+          {% endif %}
+        </div>
+        <h2 class="dept-name">{{ d.label }}</h2>
+        <p class="dept-scope">{{ d.scope }}</p>
+        <div class="dept-foot">Agent ships in <span class="dept-phase">{{ d.phase }}</span></div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <p class="dept-note">Per-tenant staffing is managed in the
+    <a href="/admin/accounting/tenantdepartmentsubscription/">admin</a> for now;
+    a self-serve console + org chart arrives in Phase P04.</p>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dept { --ink:#0a0a0a; --muted:#737373; --hair:#e5e5e5; --brand:#0d9488; --brand-soft:#ccfbf1; color:var(--ink); }
+  .dept-head { padding-bottom:1.4rem; border-bottom:1px solid var(--hair); }
+  .dept-eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); font-weight:600; }
+  .dept-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .2rem; }
+  .dept-lede { color:var(--muted); max-width:60ch; font-size:.95rem; line-height:1.55; }
+  .dept-lede strong { color:var(--ink); }
+  .dept-list { list-style:none; padding:0; margin:1.5rem 0 0; display:grid;
+               grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:.8rem; }
+  .dept-card { position:relative; background:#fff; border:1px solid var(--hair); border-radius:14px;
+               padding:1.05rem 1.2rem; overflow:hidden; }
+  .dept-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:#e5e5e5; }
+  .dept-card.is-on::before { background:var(--brand); }
+  .dept-card-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
+  .dept-code { font-family:"Geist Mono", ui-monospace, monospace; font-size:.74rem; font-weight:600;
+               background:#f5f5f5; color:#525252; padding:.18rem .45rem; border-radius:6px; }
+  .dept-badge { font-size:.66rem; font-weight:600; letter-spacing:.03em; padding:.2rem .55rem; border-radius:999px; }
+  .dept-badge--on { background:var(--brand-soft); color:#0f766e; }
+  .dept-badge--off { background:#f5f5f5; color:#a3a3a3; }
+  .dept-name { font-size:1.02rem; font-weight:600; letter-spacing:-.01em; margin:0 0 .3rem; }
+  .dept-scope { font-size:.86rem; color:var(--muted); line-height:1.5; margin:0 0 .7rem; }
+  .dept-foot { font-size:.76rem; color:#a3a3a3; }
+  .dept-phase { font-family:"Geist Mono", ui-monospace, monospace; color:#4f46e5; font-weight:600; }
+  .dept-note { margin-top:1.6rem; font-size:.82rem; color:var(--muted); border-top:1px solid var(--hair); padding-top:1.1rem; }
+  .dept-note a { color:var(--brand); text-decoration:underline; text-underline-offset:3px; }
+  @media (max-width:640px){ .dept-title{font-size:1.7rem;} .dept-list{grid-template-columns:1fr;} }
+</style>
+{% endblock %}

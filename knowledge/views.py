@@ -14,12 +14,13 @@ the caller has an active tenant (``request.tenant``).
 import json
 
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from accounting.middleware import tenant_required
 
+from .export import build_rules_review_csv
 from .forms import TenantProcedureForm, unique_procedure_slug
 from .models import Rule, TenantProcedure
 from .retrieval import retrieve
@@ -175,6 +176,23 @@ def rule_detail_view(request, slug):
         "citation_text": citation,
     }
     return render(request, "knowledge/rule_detail.html", context)
+
+
+@login_required
+def export_rules_view(request):
+    """GET /knowledge/export.csv — download every rule (optionally filtered
+    by ?framework=) as a reviewer CSV for the Step-27 expert sign-off."""
+    framework = request.GET.get("framework") or None
+    rules = Rule.objects.all().order_by(
+        "framework", "knowledge_slice", "slug")
+    if framework:
+        rules = rules.filter(framework=framework)
+
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = (
+        'attachment; filename="ea-ledgers-rules-review.csv"')
+    resp.write(build_rules_review_csv(rules))
+    return resp
 
 
 # ---------------------------------------------------------------------------

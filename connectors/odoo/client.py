@@ -65,6 +65,7 @@ class OdooClient:
                 f"ERPConnection.config missing: {', '.join(missing)}.")
         return cls(
             config["url"], config["db"], config["username"],
+            api_key=config.get("api_key"),
             api_key_env=config.get("api_key_env"),
             transport_factory=transport_factory,
         )

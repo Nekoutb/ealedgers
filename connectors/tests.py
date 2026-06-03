@@ -157,3 +157,21 @@ class BuildConnectorFromModelTests(TestCase):
             tenant=t, name="Future SAP", vendor="sap_b1")
         with self.assertRaises(ConnectorNotImplemented):
             build_connector(conn)
+
+
+class ConnectorKeyInjectionTests(TestCase):
+    """build_connector decrypts the stored API key and injects it into the
+    connector's config (so the connector can authenticate)."""
+
+    def test_decrypted_key_injected_into_config(self):
+        from accounting.models import Currency, ERPConnection, Tenant
+        xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        t = Tenant.objects.create(slug="conn-key", name="Conn Key", currency=xaf)
+        conn = ERPConnection.objects.create(
+            tenant=t, name="Odoo", vendor="odoo",
+            config={"url": "https://x.odoo.com", "db": "x", "username": "u"})
+        conn.set_api_key("secret-key")
+        conn.save()
+        connector = build_connector(conn)           # OdooConnector
+        self.assertEqual(connector.config.get("api_key"), "secret-key")
+        self.assertEqual(connector.config.get("url"), "https://x.odoo.com")

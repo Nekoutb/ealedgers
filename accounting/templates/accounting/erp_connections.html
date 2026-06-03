@@ -4,26 +4,38 @@
 {% block content %}
 <section class="erp">
   <header class="erp-head">
-    <div class="erp-eyebrow">Integrations</div>
-    <h1 class="erp-title">ERP Connections</h1>
-    <p class="erp-lede">EA Ledgers acts <em>through</em> your accounting system —
-      the agents read and post via the ERP, which stays the system of record.
-      Odoo is the first connector.</p>
+    <div>
+      <div class="erp-eyebrow">Integrations</div>
+      <h1 class="erp-title">ERP Connections</h1>
+      <p class="erp-lede">EA Ledgers acts <em>through</em> your accounting system —
+        the agents read and post via the ERP, which stays the system of record.
+        Odoo is connectable today; other vendors save and connect as their
+        adapters ship.</p>
+    </div>
+    <a class="erp-new" href="{% url 'erp_connection_create' %}">+ New connection</a>
   </header>
 
   {% if connections %}
     <ul class="erp-list">
       {% for c in connections %}
         <li class="erp-card">
-          <div class="erp-card-top">
-            <div>
-              <span class="erp-name">{{ c.name }}</span>
-              <span class="erp-vendor">{{ c.get_vendor_display }}</span>
-              {% if c.is_primary %}<span class="erp-chip">Primary</span>{% endif %}
+          <a class="erp-card-link" href="{% url 'erp_connection_edit' c.pk %}">
+            <div class="erp-card-top">
+              <div>
+                <span class="erp-name">{{ c.name }}</span>
+                <span class="erp-vendor">{{ c.get_vendor_display }}</span>
+                {% if c.is_primary %}<span class="erp-chip">Primary</span>{% endif %}
+              </div>
+              <span class="erp-health erp-health--{{ c.health }}">
+                {% if c.health == "ok" %}Connected{% else %}{{ c.get_health_display }}{% endif %}
+              </span>
             </div>
-            <span class="erp-health erp-health--{{ c.health }}">{{ c.get_health_display }}</span>
-          </div>
-          <div class="erp-meta">{{ c.capabilities|length }} capabilities · {% if c.is_active %}active{% else %}inactive{% endif %}</div>
+            <div class="erp-meta">
+              {{ c.config.url|default:"—" }} ·
+              {{ c.capabilities|length }} capabilities{% if c.last_healthcheck_at %} · tested {{ c.last_healthcheck_at|date:"Y-m-d" }}{% endif %}
+            </div>
+            {% if c.last_healthcheck_error %}<div class="erp-cardernote">{{ c.last_healthcheck_error|truncatechars:120 }}</div>{% endif %}
+          </a>
         </li>
       {% endfor %}
     </ul>
@@ -31,11 +43,10 @@
     <div class="erp-empty">
       <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 7H6a3 3 0 0 0-3 3v0a3 3 0 0 0 3 3h3M15 7h3a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-3M9 12h6"/></svg>
       <h2>No ERP connected yet</h2>
-      <p>The connector layer (capability registry + Odoo client) is built;
-         wiring a <strong>live Odoo</strong> is in progress (Phase P03). Until
-         then — or in <strong>standalone mode</strong> — the agents post to the
-         local ledger instead.</p>
-      <a class="erp-cta" href="/admin/accounting/erpconnection/add/">Configure a connection</a>
+      <p>Connect your accounting system so the agents can read and post through
+         it. <strong>Odoo</strong> works today; in standalone mode the agents
+         post to the local ledger instead.</p>
+      <a class="erp-cta" href="{% url 'erp_connection_create' %}">Connect an ERP</a>
     </div>
   {% endif %}
 </section>
@@ -43,30 +54,34 @@
 
 {% block extra_css %}
 <style>
-  .erp { --ink:#0a0a0a; --muted:#737373; --hair:#e5e5e5; --brand:#0d9488; color:var(--ink); }
-  .erp-head { padding-bottom:1.3rem; border-bottom:1px solid var(--hair); }
+  .erp { --ink:#0a0a0a; --muted:#737373; --hair:#e5e5e5; --brand:#2E8B8E; color:var(--ink); }
+  .erp-head { display:flex; align-items:flex-end; justify-content:space-between; gap:1.5rem; flex-wrap:wrap; padding-bottom:1.3rem; border-bottom:1px solid var(--hair); }
   .erp-eyebrow { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); font-weight:600; }
   .erp-title { font-size:2.1rem; line-height:1.05; font-weight:650; letter-spacing:-.02em; margin:.3rem 0 .2rem; }
   .erp-lede { color:var(--muted); max-width:58ch; font-size:.95rem; line-height:1.55; }
   .erp-lede em { color:var(--ink); font-style:normal; font-weight:600; }
+  .erp-new { background:#0a0a0a; color:#fff; font-weight:600; font-size:.86rem; padding:.6rem 1.1rem; border-radius:11px; text-decoration:none; white-space:nowrap; }
+  .erp-new:hover { background:#262626; }
   .erp-list { list-style:none; padding:0; margin:1.4rem 0 0; display:grid; gap:.7rem; }
-  .erp-card { background:#fff; border:1px solid var(--hair); border-radius:13px; padding:1rem 1.15rem; }
+  .erp-card { background:#fff; border:1px solid var(--hair); border-radius:13px; transition:border-color .15s, box-shadow .15s; }
+  .erp-card:hover { border-color:#d4d4d4; box-shadow:0 6px 22px -12px rgba(0,0,0,.18); }
+  .erp-card-link { display:block; padding:1rem 1.15rem; text-decoration:none; color:inherit; }
   .erp-card-top { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
   .erp-name { font-weight:600; }
   .erp-vendor { font-size:.82rem; color:var(--muted); margin-left:.5rem; }
   .erp-chip { font-size:.64rem; font-weight:600; background:#ccfbf1; color:#0f766e; padding:.15rem .45rem; border-radius:999px; margin-left:.4rem; }
-  .erp-health { font-size:.7rem; font-weight:600; padding:.18rem .55rem; border-radius:999px; background:#f5f5f5; color:#525252; }
+  .erp-health { font-size:.7rem; font-weight:600; padding:.18rem .55rem; border-radius:999px; background:#f5f5f5; color:#525252; white-space:nowrap; }
   .erp-health--ok { background:#d1fae5; color:#047857; }
   .erp-health--degraded { background:#fef3c7; color:#b45309; }
   .erp-health--down { background:#fee2e2; color:#b91c1c; }
   .erp-meta { font-size:.8rem; color:var(--muted); margin-top:.4rem; }
+  .erp-cardernote { font-size:.78rem; color:#b91c1c; margin-top:.35rem; }
   .erp-empty { text-align:center; padding:4.5rem 1rem; color:var(--muted); }
   .erp-empty svg { color:#d4d4d4; margin-bottom:1rem; }
   .erp-empty h2 { font-size:1.1rem; color:#404040; margin:0 0 .5rem; }
   .erp-empty p { max-width:48ch; margin:0 auto 1.3rem; line-height:1.6; }
   .erp-empty strong { color:var(--ink); }
-  .erp-cta { display:inline-block; background:#0a0a0a; color:#fff; font-weight:600; font-size:.88rem;
-             padding:.6rem 1.2rem; border-radius:11px; text-decoration:none; }
+  .erp-cta { display:inline-block; background:#0a0a0a; color:#fff; font-weight:600; font-size:.88rem; padding:.6rem 1.2rem; border-radius:11px; text-decoration:none; }
   .erp-cta:hover { background:#262626; }
   @media (max-width:640px){ .erp-title{font-size:1.7rem;} }
 </style>

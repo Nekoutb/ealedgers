@@ -45,5 +45,12 @@ def connector_for_vendor(vendor, config=None):
 
 
 def build_connector(connection):
-    """Instantiate the connector for an ``ERPConnection`` model instance."""
-    return connector_for_vendor(connection.vendor, connection.config)
+    """Instantiate the connector for an ``ERPConnection`` model instance,
+    injecting its decrypted API key into the config so the connector can
+    authenticate. The key is never persisted in config — only passed in
+    transit to the connector."""
+    config = dict(connection.config or {})
+    key = connection.get_api_key()
+    if key:
+        config["api_key"] = key
+    return connector_for_vendor(connection.vendor, config)

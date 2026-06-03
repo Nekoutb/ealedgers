@@ -16,16 +16,18 @@ agents + the ERP, not hand-keyed screens.
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseRedirect
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
 
-from .forms import SignupForm
+from .forms import ERPConnectionForm, SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     AgentRun,
     ERPConnection,
     SUBSCRIBABLE_DEPARTMENTS,
 )
-from django.views.decorators.http import require_POST
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +227,71 @@ def erp_connections(request):
         "page_name": "ERP Connections",
         "connections": connections,
     })
+
+
+def _test_connection(connection):
+    """Health-check the connection and persist the result — the
+    "connection is tested on save" behaviour. Never raises."""
+    from connectors.base import ConnectorError
+    from connectors.registry import build_connector
+    try:
+        health = build_connector(connection).health_check()
+        connection.health = health.state
+        connection.capabilities = list(health.capabilities or [])
+        connection.last_healthcheck_error = "" if health.ok else health.detail
+    except ConnectorError as exc:
+        connection.health = "down"
+        connection.last_healthcheck_error = str(exc)
+    except Exception as exc:  # noqa: BLE001 — report, never 500 the form
+        connection.health = "down"
+        connection.last_healthcheck_error = f"{type(exc).__name__}: {exc}"
+    connection.last_healthcheck_at = timezone.now()
+    connection.save(update_fields=[
+        "health", "capabilities", "last_healthcheck_error",
+        "last_healthcheck_at"])
+    return connection
+
+
+@login_required
+@tenant_required
+def erp_connection_create(request):
+    """Create an ERP connection and test it on save."""
+    if request.method == "POST":
+        form = ERPConnectionForm(request.POST)
+        if form.is_valid():
+            conn = ERPConnection(tenant=request.tenant)
+            form.apply_to(conn)
+            key = form.cleaned_data.get("api_key")
+            if key:
+                conn.set_api_key(key)
+            conn.save()
+            _test_connection(conn)
+            return redirect(reverse("erp_connections"))
+    else:
+        form = ERPConnectionForm()
+    return render(request, "accounting/erp_connection_form.html", {
+        "page_name": "ERP Connections", "form": form, "mode": "create"})
+
+
+@login_required
+@tenant_required
+def erp_connection_edit(request, pk):
+    """Edit a connection. A blank API key keeps the stored (encrypted) one.
+    Re-tests on save."""
+    conn = get_object_or_404(
+        ERPConnection.objects.for_tenant(request.tenant), pk=pk)
+    if request.method == "POST":
+        form = ERPConnectionForm(request.POST)
+        if form.is_valid():
+            form.apply_to(conn)
+            key = form.cleaned_data.get("api_key")
+            if key:  # blank → keep the existing key
+                conn.set_api_key(key)
+            conn.save()
+            _test_connection(conn)
+            return redirect(reverse("erp_connections"))
+    else:
+        form = ERPConnectionForm(initial=ERPConnectionForm.initial_from(conn))
+    return render(request, "accounting/erp_connection_form.html", {
+        "page_name": "ERP Connections", "form": form, "mode": "edit",
+        "connection": conn})

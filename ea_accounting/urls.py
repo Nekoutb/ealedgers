@@ -7,6 +7,8 @@ from django.urls import include, path
 from accounting.views import (
     agent_activity,
     departments,
+    erp_connection_create,
+    erp_connection_edit,
     erp_connections,
     signup,
     switch_tenant_view,
@@ -36,6 +38,8 @@ urlpatterns = [
     path('departments/', departments, name='departments'),
     path('agents/', agent_activity, name='agent_activity'),
     path('erp/', erp_connections, name='erp_connections'),
+    path('erp/new/', erp_connection_create, name='erp_connection_create'),
+    path('erp/<int:pk>/edit/', erp_connection_edit, name='erp_connection_edit'),
     # Knowledge layer (retrieval API + rule explorer + tenant procedures)
     path('knowledge/', include('knowledge.urls', namespace='knowledge')),
     # Django admin houses the CRUD UIs that the module nav links into

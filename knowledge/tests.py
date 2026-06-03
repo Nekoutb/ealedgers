@@ -1145,3 +1145,65 @@ class RetrievalQualityTests(TestCase):
                        "lang:fr", "lang:en"):
             self.assertIn(bucket, self.metrics)
             self.assertIn("r_at_5", self.metrics[bucket])
+
+
+# ---------------------------------------------------------------------------
+# Step 27 enablement — rule-review CSV export
+# ---------------------------------------------------------------------------
+
+import csv as _csv  # noqa: E402
+import io as _io  # noqa: E402
+
+
+class RuleExportTests(TestCase):
+    """The reviewer CSV export (download view + builder)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(
+            "exp_u", "e@a.test", "pw123456")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _rows(self, body):
+        return list(_csv.reader(_io.StringIO(body), delimiter=";"))
+
+    def test_export_requires_login(self):
+        self.client.logout()
+        self.assertEqual(
+            self.client.get(reverse("knowledge:export_rules")).status_code, 302)
+
+    def test_export_all_rules_csv(self):
+        resp = self.client.get(reverse("knowledge:export_rules"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/csv", resp["Content-Type"])
+        self.assertIn("attachment", resp["Content-Disposition"])
+        body = resp.content.decode("utf-8-sig")  # strip BOM
+        rows = self._rows(body)
+        self.assertEqual(len(rows), Rule.objects.count() + 1)   # header + rules
+        self.assertEqual(rows[0][0], "Framework")
+        self.assertIn("Citation", rows[0])
+        self.assertIn("cgi-2025-is-rate", body)
+
+    def test_export_has_utf8_bom(self):
+        resp = self.client.get(reverse("knowledge:export_rules"))
+        self.assertTrue(resp.content.startswith(b"\xef\xbb\xbf"))
+
+    def test_export_framework_filter(self):
+        resp = self.client.get(
+            reverse("knowledge:export_rules"), {"framework": "CGI-2025"})
+        body = resp.content.decode("utf-8-sig")
+        rows = self._rows(body)
+        self.assertEqual(
+            len(rows), Rule.objects.filter(framework="CGI-2025").count() + 1)
+        self.assertNotIn("syscohada-", body)  # only CGI rows
+
+    def test_builder_header_and_shape(self):
+        from knowledge.export import HEADER, build_rules_review_csv
+        rules = list(Rule.objects.all()[:3])
+        text = build_rules_review_csv(rules)
+        self.assertTrue(text.startswith("﻿"))  # leading BOM
+        rows = self._rows(text.lstrip("﻿"))
+        self.assertEqual(rows[0], HEADER)
+        self.assertEqual(len(rows), len(rules) + 1)

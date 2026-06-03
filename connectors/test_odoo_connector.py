@@ -1,8 +1,8 @@
-"""OdooConnector tests (Step 30) — mocked client, no network or creds.
+"""OdooConnector tests (Steps 30-31) — mocked client, no network or creds.
 
-CAP.01 (lookup chart of accounts) is exercised against a fake OdooClient.
-Live verification against a real Odoo is done once the owner provides
-connection details.
+CAP.01 (lookup chart of accounts) and CAP.02 (lookup/create partner) are
+exercised against a fake OdooClient. Live verification against a real Odoo is
+done once the owner connects an instance via the ERP-connection form.
 """
 
 from django.test import SimpleTestCase
@@ -13,17 +13,24 @@ from connectors.registry import connector_for_vendor
 
 
 class FakeClient:
-    def __init__(self, rows=None, health=None):
+    def __init__(self, rows=None, health=None, create_id=42):
         self.rows = rows if rows is not None else []
         self._health = health or HealthStatus(
             ok=True, state="ok", detail="authenticated")
+        self.create_id = create_id
         self.search_calls = []
+        self.create_calls = []
 
     def search_read(self, model, domain=None, fields=None, limit=None,
                     order=None):
         self.search_calls.append({
-            "model": model, "domain": domain, "fields": fields, "order": order})
+            "model": model, "domain": domain, "fields": fields,
+            "limit": limit, "order": order})
         return self.rows
+
+    def create(self, model, values):
+        self.create_calls.append({"model": model, "values": values})
+        return self.create_id
 
     def health_check(self):
         return self._health
@@ -77,8 +84,6 @@ class OdooConnectorTests(SimpleTestCase):
         with self.assertRaises(CapabilityNotSupported):
             c.post_journal_entry()   # CAP.03 — not until Step 32
         with self.assertRaises(CapabilityNotSupported):
-            c.upsert_partner()       # CAP.02 — not until Step 31
-        with self.assertRaises(CapabilityNotSupported):
             c.fetch_trial_balance()  # CAP.17 — not until Step 33
 
     def test_health_check_delegates_and_enriches(self):
@@ -95,3 +100,57 @@ class OdooConnectorTests(SimpleTestCase):
         h = c.health_check()
         self.assertFalse(h.ok)
         self.assertEqual(h.state, "unconfigured")
+
+
+class OdooConnectorPartnerTests(SimpleTestCase):
+    def _conn(self, rows=None, create_id=42):
+        return OdooConnector(config={},
+                             client=FakeClient(rows=rows, create_id=create_id))
+
+    def test_declares_cap02(self):
+        self.assertIn("CAP.02", self._conn().capabilities)
+
+    def test_find_partner_by_vat(self):
+        rows = [{"id": 3, "name": "Acme", "vat": "P012", "email": "a@x.cm",
+                 "is_company": True}]
+        c = self._conn(rows=rows)
+        p = c.find_partner(vat="P012")
+        self.assertEqual(p["external_id"], 3)
+        self.assertEqual(p["name"], "Acme")
+        call = c.client.search_calls[0]
+        self.assertEqual(call["model"], "res.partner")
+        self.assertEqual(call["domain"], [["vat", "=", "P012"]])
+        self.assertEqual(call["limit"], 1)
+
+    def test_find_partner_absent_returns_none(self):
+        self.assertIsNone(self._conn(rows=[]).find_partner(name="Nobody"))
+
+    def test_find_partner_needs_a_criterion(self):
+        self.assertIsNone(self._conn().find_partner())
+
+    def test_create_partner_builds_payload(self):
+        c = self._conn(create_id=77)
+        out = c.create_partner(name="Beta SARL", vat="P9", email="b@x.cm",
+                               is_supplier=True)
+        self.assertEqual(out["external_id"], 77)
+        self.assertTrue(out["created"])
+        vals = c.client.create_calls[0]["values"]
+        self.assertEqual(vals["name"], "Beta SARL")
+        self.assertEqual(vals["vat"], "P9")
+        self.assertEqual(vals["supplier_rank"], 1)
+        self.assertNotIn("customer_rank", vals)
+
+    def test_upsert_returns_existing_without_creating(self):
+        rows = [{"id": 5, "name": "Acme", "vat": "P1", "is_company": True}]
+        c = self._conn(rows=rows)
+        out = c.upsert_partner(name="Acme", vat="P1")
+        self.assertEqual(out["external_id"], 5)
+        self.assertFalse(out["created"])
+        self.assertEqual(c.client.create_calls, [])  # nothing created
+
+    def test_upsert_creates_when_absent(self):
+        c = self._conn(rows=[], create_id=9)
+        out = c.upsert_partner(name="New Co", is_customer=True)
+        self.assertTrue(out["created"])
+        self.assertEqual(out["external_id"], 9)
+        self.assertEqual(c.client.create_calls[0]["values"]["customer_rank"], 1)

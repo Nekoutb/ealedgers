@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.text import slugify
 
-from accounting.models import Membership, Tenant
+from accounting.models import ERPConnection, Membership, Tenant
 
 
 User = get_user_model()
@@ -135,3 +135,62 @@ class SignupForm(forms.Form):
         # Convenience for the view — avoids a second roundtrip.
         user._signup_tenant = tenant  # noqa: SLF001
         return user
+
+
+class ERPConnectionForm(forms.Form):
+    """Create / edit a tenant's ERP connection. The API key is write-only:
+    on edit it's left blank to keep the stored (encrypted) value. Connection
+    is tested on save by the view."""
+
+    vendor = forms.ChoiceField(choices=ERPConnection.VENDORS)
+    name = forms.CharField(
+        max_length=64,
+        widget=forms.TextInput(attrs={"placeholder": "e.g. Production Odoo"}),
+    )
+    base_url = forms.URLField(
+        required=False, label="Base URL",
+        widget=forms.URLInput(attrs={"placeholder": "https://yourco.odoo.com"}),
+    )
+    database = forms.CharField(
+        max_length=128, required=False, label="Database name",
+        widget=forms.TextInput(attrs={"placeholder": "yourco"}),
+    )
+    api_user = forms.CharField(
+        max_length=128, required=False, label="API user",
+        widget=forms.TextInput(attrs={"placeholder": "agent@yourco.com"}),
+    )
+    api_key = forms.CharField(
+        required=False, label="API key",
+        widget=forms.PasswordInput(render_value=False,
+                                   attrs={"autocomplete": "new-password"}),
+    )
+    is_primary = forms.BooleanField(
+        required=False, label="Primary connection")
+
+    @staticmethod
+    def initial_from(connection):
+        """Build the initial dict for editing an existing connection (the API
+        key is never pre-filled — it's encrypted and write-only)."""
+        cfg = connection.config or {}
+        return {
+            "vendor": connection.vendor,
+            "name": connection.name,
+            "base_url": cfg.get("url", ""),
+            "database": cfg.get("db", ""),
+            "api_user": cfg.get("username", ""),
+            "is_primary": connection.is_primary,
+        }
+
+    def apply_to(self, connection):
+        """Write the cleaned non-secret fields onto an ERPConnection
+        instance. The API key is handled separately by the view (so a blank
+        value keeps the existing key on edit)."""
+        cd = self.cleaned_data
+        connection.vendor = cd["vendor"]
+        connection.name = cd["name"]
+        connection.is_primary = cd["is_primary"]
+        config = dict(connection.config or {})
+        config["url"] = cd.get("base_url", "")
+        config["db"] = cd.get("database", "")
+        config["username"] = cd.get("api_user", "")
+        connection.config = config

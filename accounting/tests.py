@@ -2180,3 +2180,115 @@ class PlatformShellViewTests(TestCase):
         resp = self.client.get("/departments/")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/workspace/", resp["Location"])
+
+
+# ---------------------------------------------------------------------------
+# ERP connection config UI + encrypted credentials
+# ---------------------------------------------------------------------------
+
+from django.test import SimpleTestCase as _SimpleTestCase  # noqa: E402
+from accounting.crypto import encrypt_secret, decrypt_secret  # noqa: E402
+
+
+class CryptoSecretTests(_SimpleTestCase):
+    def test_round_trip(self):
+        token = encrypt_secret("super-secret-api-key")
+        self.assertNotIn("super-secret", token)          # not plaintext
+        self.assertEqual(decrypt_secret(token), "super-secret-api-key")
+
+    def test_empty_is_empty(self):
+        self.assertEqual(encrypt_secret(""), "")
+        self.assertEqual(decrypt_secret(""), "")
+
+    def test_bad_token_returns_empty(self):
+        self.assertEqual(decrypt_secret("not-a-valid-token"), "")
+
+
+class ERPConnectionCredentialTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="erp-cred", name="ERP Cred", currency=cls.xaf)
+
+    def test_set_get_api_key_encrypted(self):
+        c = ERPConnection(tenant=self.t, name="Odoo", vendor="odoo")
+        c.set_api_key("abc123")
+        self.assertTrue(c.secret_ciphertext)
+        self.assertNotIn("abc123", c.secret_ciphertext)   # stored encrypted
+        self.assertEqual(c.get_api_key(), "abc123")
+        self.assertTrue(c.has_api_key)
+
+    def test_clear_api_key(self):
+        c = ERPConnection(tenant=self.t, name="Odoo", vendor="odoo")
+        c.set_api_key("x")
+        c.set_api_key("")
+        self.assertEqual(c.secret_ciphertext, "")
+        self.assertFalse(c.has_api_key)
+
+    def test_env_var_fallback(self):
+        from unittest import mock
+        c = ERPConnection(tenant=self.t, name="Odoo", vendor="odoo",
+                          config={"api_key_env": "ODOO_FALLBACK_KEY"})
+        with mock.patch.dict("os.environ", {"ODOO_FALLBACK_KEY": "from-env"}):
+            self.assertEqual(c.get_api_key(), "from-env")
+            self.assertTrue(c.has_api_key)
+
+
+class ERPConnectionConfigViewTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(
+            "erp_u", "e@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="erp-view", name="ERP View", currency=cls.xaf)
+        Membership.objects.create(user=cls.user, tenant=cls.t, role="owner")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_create_tests_on_save_and_encrypts_key(self):
+        # vendor=manual -> NullConnector health-check (no network).
+        resp = self.client.post("/erp/new/", {
+            "vendor": "manual", "name": "Standalone",
+            "base_url": "", "database": "", "api_user": "",
+            "api_key": "topsecret",
+        })
+        self.assertEqual(resp.status_code, 302)
+        c = ERPConnection.objects.for_tenant(self.t).get(name="Standalone")
+        self.assertIsNotNone(c.last_healthcheck_at)        # tested on save
+        self.assertTrue(c.secret_ciphertext)
+        self.assertNotIn("topsecret", c.secret_ciphertext)  # encrypted
+        self.assertEqual(c.get_api_key(), "topsecret")
+
+    def test_edit_blank_key_keeps_existing(self):
+        c = ERPConnection.objects.create(tenant=self.t, name="Odoo", vendor="manual")
+        c.set_api_key("keepme")
+        c.save()
+        resp = self.client.post(f"/erp/{c.pk}/edit/", {
+            "vendor": "manual", "name": "Odoo renamed",
+            "base_url": "", "database": "", "api_user": "", "api_key": "",
+        })
+        self.assertEqual(resp.status_code, 302)
+        c.refresh_from_db()
+        self.assertEqual(c.name, "Odoo renamed")
+        self.assertEqual(c.get_api_key(), "keepme")        # kept
+
+    def test_edit_new_key_replaces(self):
+        c = ERPConnection.objects.create(tenant=self.t, name="Odoo", vendor="manual")
+        c.set_api_key("old")
+        c.save()
+        self.client.post(f"/erp/{c.pk}/edit/", {
+            "vendor": "manual", "name": "Odoo", "base_url": "", "database": "",
+            "api_user": "", "api_key": "new",
+        })
+        c.refresh_from_db()
+        self.assertEqual(c.get_api_key(), "new")
+
+    def test_edit_other_tenant_404(self):
+        other = Tenant.objects.create(slug="erp-other", name="Other", currency=self.xaf)
+        c = ERPConnection.objects.create(tenant=other, name="Theirs", vendor="manual")
+        self.assertEqual(self.client.get(f"/erp/{c.pk}/edit/").status_code, 404)
+
+    def test_create_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get("/erp/new/").status_code, 302)

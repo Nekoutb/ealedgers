@@ -2143,12 +2143,16 @@ class ERPConnection(models.Model):
     vendor = models.CharField(max_length=32, choices=VENDORS)
     version = models.CharField(max_length=32, blank=True, help_text='e.g. "17.0"')
 
-    # Routing config. Secrets live in env vars named here; never store
-    # actual credentials in this row.
+    # Non-secret routing config: url, db, username (+ optional api_key_env
+    # fallback). The API key itself is encrypted in `secret_ciphertext`.
     config = models.JSONField(
         default=dict, blank=True,
-        help_text='URL, port, db name, env-var names referencing secrets.',
+        help_text='Non-secret connection settings: url, db, username.',
     )
+
+    # API key, encrypted at rest (Fernet — see accounting.crypto). Never
+    # stored or displayed in plaintext; set via set_api_key().
+    secret_ciphertext = models.TextField(blank=True, default='')
 
     # List of CAP.NN slugs confirmed at last healthcheck.
     capabilities = models.JSONField(default=list, blank=True)
@@ -2173,6 +2177,29 @@ class ERPConnection(models.Model):
 
     def __str__(self):
         return f'{self.name} ({self.get_vendor_display()})'
+
+    # ----- credentials (encrypted at rest) --------------------------------
+    def set_api_key(self, raw):
+        """Encrypt and store the API key. Empty/None clears it."""
+        from accounting.crypto import encrypt_secret
+        self.secret_ciphertext = encrypt_secret(raw) if raw else ''
+
+    def get_api_key(self):
+        """Decrypt the stored API key, or fall back to an env var named in
+        ``config['api_key_env']``. Returns '' if neither is set."""
+        from accounting.crypto import decrypt_secret
+        if self.secret_ciphertext:
+            return decrypt_secret(self.secret_ciphertext)
+        env_name = (self.config or {}).get('api_key_env')
+        if env_name:
+            import os
+            return os.environ.get(env_name, '')
+        return ''
+
+    @property
+    def has_api_key(self):
+        return bool(self.secret_ciphertext) or bool(
+            (self.config or {}).get('api_key_env'))
 
 
 class ERPOperation(models.Model):

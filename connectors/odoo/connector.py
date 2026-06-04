@@ -5,15 +5,16 @@ declares the capabilities it has *implemented* (CAP.01 now; CAP.02/03/17 land
 in Steps 31-33) and self-registers under vendor ``"odoo"`` so the factory
 resolves it.
 
-CAP.01 (lookup chart of accounts) is implemented here. It reads ``code`` and
-``name`` — universal across Odoo versions — plus ``deprecated``; the richer
-account-type field is intentionally left out of the default field set because
-its name differs by Odoo version (``account_type`` in 17, ``user_type_id``
-earlier). Override the field set per tenant via ``config['coa_fields']`` once
-the version is known.
+CAP.01 (lookup chart of accounts) is implemented here. It reads ``code``,
+``name``, ``account_type`` and ``active`` — all present on Odoo 17/18/19.
+NOTE: Odoo 17 REMOVED ``account.account.deprecated`` (and pre-17 used
+``user_type_id`` instead of ``account_type``); archiving is now the standard
+``active`` field, so we never filter or read ``deprecated``. Verified live
+against Odoo saas~19.3 (2026-06-04). Override the field set per tenant via
+``config['coa_fields']`` for an older instance.
 
-Live verification (pulls a real CoA) needs the tenant's Odoo instance; the
-logic here is exercised offline against a fake client.
+Live verification confirmed CAP.01 + CAP.02 against the tenant's Odoo; the
+logic here is also exercised offline against a fake client.
 """
 
 from connectors.base import HealthStatus, IConnector
@@ -25,8 +26,10 @@ from connectors.registry import register_connector
 class OdooConnector(IConnector):
     vendor = "odoo"
 
-    # Default account.account fields that are safe across Odoo versions.
-    DEFAULT_COA_FIELDS = ["code", "name", "deprecated"]
+    # Default account.account fields. Present on Odoo 17/18/19 (NOT
+    # ``deprecated`` — removed in 17). Override via config['coa_fields'] for
+    # an older Odoo (e.g. swap account_type -> user_type_id).
+    DEFAULT_COA_FIELDS = ["code", "name", "account_type", "active"]
 
     def __init__(self, config=None, client=None):
         super().__init__(config)
@@ -64,12 +67,19 @@ class OdooConnector(IConnector):
     # ----- CAP.01: lookup chart of accounts -------------------------------
     def lookup_chart_of_accounts(self, active_only=True):
         """Return the ERP's accounts as normalised dicts:
-        ``{external_id, code, name, deprecated, raw}``."""
+        ``{external_id, code, name, account_type, active, raw}``.
+
+        Odoo 17+ dropped ``account.account.deprecated``; archiving uses the
+        standard ``active`` field, which Odoo's default ``active_test`` already
+        excludes. So ``active_only`` needs no domain filter — to INCLUDE
+        archived accounts we disable ``active_test`` via context instead.
+        """
         self.require("CAP.01")
         fields = self.config.get("coa_fields") or self.DEFAULT_COA_FIELDS
-        domain = [["deprecated", "=", False]] if active_only else []
+        context = None if active_only else {"active_test": False}
         rows = self.client.search_read(
-            "account.account", domain=domain, fields=fields, order="code")
+            "account.account", domain=[], fields=fields, order="code",
+            context=context)
         return [self._normalise_account(r) for r in rows]
 
     @staticmethod
@@ -78,7 +88,8 @@ class OdooConnector(IConnector):
             "external_id": row.get("id"),
             "code": row.get("code"),
             "name": row.get("name"),
-            "deprecated": row.get("deprecated", False),
+            "account_type": row.get("account_type"),
+            "active": row.get("active", True),
             "raw": row,
         }
 

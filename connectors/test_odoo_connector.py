@@ -22,10 +22,10 @@ class FakeClient:
         self.create_calls = []
 
     def search_read(self, model, domain=None, fields=None, limit=None,
-                    order=None):
+                    order=None, context=None):
         self.search_calls.append({
             "model": model, "domain": domain, "fields": fields,
-            "limit": limit, "order": order})
+            "limit": limit, "order": order, "context": context})
         return self.rows
 
     def create(self, model, values):
@@ -52,24 +52,46 @@ class OdooConnectorTests(SimpleTestCase):
 
     def test_lookup_chart_of_accounts_normalises_rows(self):
         rows = [
-            {"id": 5, "code": "601000", "name": "Achats", "deprecated": False},
-            {"id": 9, "code": "701000", "name": "Ventes", "deprecated": False},
+            {"id": 5, "code": "601000", "name": "Achats",
+             "account_type": "expense", "active": True},
+            {"id": 9, "code": "701000", "name": "Ventes",
+             "account_type": "income", "active": True},
         ]
         c = self._conn(rows=rows)
         out = c.lookup_chart_of_accounts()
         self.assertEqual(out[0], {
             "external_id": 5, "code": "601000", "name": "Achats",
-            "deprecated": False, "raw": rows[0]})
+            "account_type": "expense", "active": True, "raw": rows[0]})
         call = c.client.search_calls[0]
         self.assertEqual(call["model"], "account.account")
-        self.assertEqual(call["domain"], [["deprecated", "=", False]])
-        self.assertEqual(call["fields"], ["code", "name", "deprecated"])
+        # No deprecated filter (the field was removed in Odoo 17+); the default
+        # active_test already excludes archived accounts.
+        self.assertEqual(call["domain"], [])
+        self.assertEqual(call["fields"],
+                         ["code", "name", "account_type", "active"])
         self.assertEqual(call["order"], "code")
+        self.assertIsNone(call["context"])
 
     def test_lookup_all_when_not_active_only(self):
         c = self._conn(rows=[])
         c.lookup_chart_of_accounts(active_only=False)
-        self.assertEqual(c.client.search_calls[0]["domain"], [])
+        call = c.client.search_calls[0]
+        self.assertEqual(call["domain"], [])
+        # Archived accounts are included by disabling active_test via context.
+        self.assertEqual(call["context"], {"active_test": False})
+
+    def test_coa_never_references_deprecated_field(self):
+        """Regression guard: Odoo 17+ has no account.account.deprecated, so it
+        must never appear in the default fields, the domain, or the output."""
+        c = self._conn(rows=[
+            {"id": 1, "code": "101100", "name": "Capital",
+             "account_type": "equity", "active": True}])
+        out = c.lookup_chart_of_accounts()
+        self.assertNotIn("deprecated", OdooConnector.DEFAULT_COA_FIELDS)
+        call = c.client.search_calls[0]
+        self.assertNotIn("deprecated", call["fields"])
+        self.assertNotIn("deprecated", str(call["domain"]))
+        self.assertNotIn("deprecated", out[0])
 
     def test_coa_fields_overridable_via_config(self):
         c = OdooConnector(

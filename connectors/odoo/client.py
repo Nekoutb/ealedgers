@@ -123,7 +123,7 @@ class OdooClient:
 
     # ----- CRUD helpers --------------------------------------------------
     def search_read(self, model, domain=None, fields=None, limit=None,
-                    order=None):
+                    order=None, context=None):
         kwargs = {}
         if fields is not None:
             kwargs["fields"] = fields
@@ -131,6 +131,10 @@ class OdooClient:
             kwargs["limit"] = limit
         if order is not None:
             kwargs["order"] = order
+        if context is not None:
+            # Odoo reads context from kwargs (e.g. {"active_test": False} to
+            # include archived records).
+            kwargs["context"] = context
         return self.execute_kw(model, "search_read", [domain or []], kwargs)
 
     def read(self, model, ids, fields=None):

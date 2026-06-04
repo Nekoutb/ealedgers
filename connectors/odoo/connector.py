@@ -1,8 +1,9 @@
 """OdooConnector — the IConnector implementation for Odoo (Step 30).
 
 Wraps the low-level ``OdooClient`` (Step 29) in the capability contract. It
-declares the capabilities it has *implemented* (CAP.01 now; CAP.02/03/17 land
-in Steps 31-33) and self-registers under vendor ``"odoo"`` so the factory
+declares the capabilities it has *implemented* — CAP.01 (read CoA), CAP.02
+(lookup/create partner), CAP.03 (post journal entry); CAP.17 (trial balance)
+lands in Step 33 — and self-registers under vendor ``"odoo"`` so the factory
 resolves it.
 
 CAP.01 (lookup chart of accounts) is implemented here. It reads ``code``,
@@ -40,9 +41,9 @@ class OdooConnector(IConnector):
 
     @property
     def capabilities(self):
-        # Grows as Steps 32-33 add CAP.03 (post JE), CAP.17 (trial balance).
-        # Declaring == implemented keeps it honest.
-        return frozenset({"CAP.01", "CAP.02"})
+        # Grows as Step 33 adds CAP.17 (trial balance). Declaring ==
+        # implemented keeps it honest.
+        return frozenset({"CAP.01", "CAP.02", "CAP.03"})
 
     # ----- client (lazy) --------------------------------------------------
     @property
@@ -150,3 +151,122 @@ class OdooConnector(IConnector):
             "is_company": row.get("is_company", True),
             "raw": row,
         }
+
+    # ----- CAP.03: post a journal entry -----------------------------------
+    def post_journal_entry(self, *, lines, date, ref="", journal_code=None,
+                           journal_id=None, post=False, move_type="entry"):
+        """Create a balanced journal entry (``account.move``) from ``lines``.
+
+        ``lines``: iterable of dicts, each with
+          - ``account_code`` (str) OR ``account_id`` (int) — required
+          - ``debit`` and ``credit`` (numbers; one is non-zero)
+          - ``name`` (str, optional) — the line label
+          - ``partner_id`` (int, optional)
+        ``date``: ``"YYYY-MM-DD"``.  ``ref``: the entry's reference/label.
+        ``journal_code`` / ``journal_id``: which journal (Odoo REQUIRES one for
+        an ``account.move``); a code is resolved to its id.
+
+        ``post`` defaults to **False** → the entry is created in **draft** for a
+        human to review in Odoo; pass ``post=True`` to validate it
+        (``action_post``). ``move_type="entry"`` is a general journal entry.
+
+        Returns ``{external_id, state, posted, balanced, line_count,
+        total_debit, total_credit}``. Raises ``ValueError`` (BEFORE any write)
+        if the entry is empty, does not balance, or an account/journal can't be
+        resolved. This is a WRITE — only runs against a live Odoo when invoked.
+        """
+        self.require("CAP.03")
+        lines = list(lines)
+        if not lines:
+            raise ValueError("A journal entry needs at least one line.")
+
+        # 1) Balance + non-zero check — fail fast, before touching Odoo.
+        total_debit = round(sum(float(ln.get("debit") or 0) for ln in lines), 2)
+        total_credit = round(
+            sum(float(ln.get("credit") or 0) for ln in lines), 2)
+        if total_debit != total_credit:
+            raise ValueError(
+                f"Journal entry does not balance: debit {total_debit} != "
+                f"credit {total_credit}.")
+        if total_debit == 0:
+            raise ValueError("Journal entry total is zero — nothing to post.")
+
+        # 2) Resolve the journal (required by Odoo) and any account codes.
+        jid = journal_id or self._resolve_journal_id(journal_code)
+        codes = []
+        for ln in lines:
+            if ln.get("account_id") is None:
+                code = ln.get("account_code")
+                if not code:
+                    raise ValueError(
+                        "Each line needs an account_code or account_id.")
+                codes.append(code)
+        account_ids = self._resolve_account_ids(codes)
+
+        # 3) Build account.move.line create-commands ([0, 0, vals]).
+        line_cmds = []
+        for ln in lines:
+            aid = ln.get("account_id")
+            if aid is None:
+                aid = account_ids[ln["account_code"]]
+            vals = {
+                "account_id": aid,
+                "name": ln.get("name") or ref or "/",
+                "debit": float(ln.get("debit") or 0),
+                "credit": float(ln.get("credit") or 0),
+            }
+            if ln.get("partner_id"):
+                vals["partner_id"] = ln["partner_id"]
+            line_cmds.append([0, 0, vals])
+
+        move_id = self.client.create("account.move", {
+            "move_type": move_type,
+            "journal_id": jid,
+            "date": date,
+            "ref": ref,
+            "line_ids": line_cmds,
+        })
+
+        state = "draft"
+        if post:
+            # Validate the draft. Odoo re-checks the balance server-side.
+            self.client.execute_kw(
+                "account.move", "action_post", [[move_id]])
+            state = "posted"
+
+        return {
+            "external_id": move_id,
+            "state": state,
+            "posted": bool(post),
+            "balanced": True,
+            "line_count": len(lines),
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+        }
+
+    def _resolve_journal_id(self, journal_code):
+        if not journal_code:
+            raise ValueError(
+                "post_journal_entry needs journal_code or journal_id "
+                "(Odoo requires a journal for account.move).")
+        rows = self.client.search_read(
+            "account.journal", domain=[["code", "=", journal_code]],
+            fields=["id", "code", "type"], limit=1)
+        if not rows:
+            raise ValueError(f"No Odoo journal with code {journal_code!r}.")
+        return rows[0]["id"]
+
+    def _resolve_account_ids(self, codes):
+        """Map account codes → ids in one query. Raises if any are unknown."""
+        codes = list(dict.fromkeys(codes))  # de-dup, preserve order
+        if not codes:
+            return {}
+        rows = self.client.search_read(
+            "account.account", domain=[["code", "in", codes]],
+            fields=["id", "code"])
+        found = {r["code"]: r["id"] for r in rows}
+        missing = [c for c in codes if c not in found]
+        if missing:
+            raise ValueError(
+                "Account code(s) not found in Odoo: " + ", ".join(missing))
+        return found

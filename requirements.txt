@@ -11,3 +11,8 @@ psycopg[binary]>=3.1
 # The qcluster worker process is run as a systemd unit on the server (part
 # of the SSH bundle: Steps 3+5+10); until then tasks simply queue.
 django-q2>=1.7
+# Symmetric encryption for secrets at rest (ERP API keys — accounting/crypto.py,
+# Fernet). RUNTIME dependency: ERPConnection.set_api_key/get_api_key import it
+# lazily, so the app boots without it but the ERP "test on save" path 500s.
+# Ships prebuilt abi3 manylinux wheels (no compiler needed on the server).
+cryptography>=43,<49

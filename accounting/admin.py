@@ -8,6 +8,7 @@ from .models import (
     Account,
     AgentRun,
     AgentToolCall,
+    ApprovalQueueItem,
     BankStatement,
     BankStatementLine,
     Company,
@@ -979,3 +980,106 @@ class ProvenanceAdmin(TenantAwareAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Step 42 — Approval queue
+# ---------------------------------------------------------------------------
+
+def _approve_items(modeladmin, request, queryset):
+    """Admin action: approve all selected pending items."""
+    count = 0
+    for item in queryset.filter(status='pending'):
+        item.approve(user=request.user, note='Bulk-approved via admin action.')
+        count += 1
+    modeladmin.message_user(
+        request,
+        f'{count} item(s) approved.',
+        level=messages.SUCCESS,
+    )
+
+
+_approve_items.short_description = 'Approve selected pending items'
+
+
+def _reject_items(modeladmin, request, queryset):
+    """Admin action: reject all selected pending items."""
+    count = 0
+    for item in queryset.filter(status='pending'):
+        item.reject(user=request.user, note='Bulk-rejected via admin action.')
+        count += 1
+    modeladmin.message_user(
+        request,
+        f'{count} item(s) rejected.',
+        level=messages.WARNING,
+    )
+
+
+_reject_items.short_description = 'Reject selected pending items'
+
+
+@admin.register(ApprovalQueueItem)
+class ApprovalQueueItemAdmin(TenantAwareAdmin):
+    list_display = (
+        'dept_code', 'action_short', 'status_badge',
+        'chain_id_short', 'reviewed_by', 'created_at',
+    )
+    list_filter = ('dept_code', 'status')
+    search_fields = ('action', 'chain_id', 'review_note')
+    readonly_fields = (
+        'tenant', 'dept_code', 'action', 'inputs', 'specialist_results',
+        'chain_id', 'metadata', 'created_at',
+    )
+    list_select_related = ('reviewed_by',)
+    date_hierarchy = 'created_at'
+    actions = [_approve_items, _reject_items]
+
+    fieldsets = (
+        (None, {
+            'fields': ('tenant', 'dept_code', 'action', 'chain_id'),
+        }),
+        ('Proposal details', {
+            'fields': ('inputs', 'specialist_results', 'metadata'),
+            'classes': ('collapse',),
+        }),
+        ('Review', {
+            'fields': ('status', 'reviewed_by', 'review_note', 'reviewed_at'),
+        }),
+        ('Audit', {
+            'fields': ('created_at',),
+            'classes': ('collapse',),
+        }),
+    )
+
+    @admin.display(description='Action')
+    def action_short(self, obj):
+        return obj.action[:70] + ('…' if len(obj.action) > 70 else '')
+
+    @admin.display(description='Chain ID')
+    def chain_id_short(self, obj):
+        return obj.chain_id[:12] + '…' if len(obj.chain_id) > 12 else obj.chain_id
+
+    @admin.display(description='Status')
+    def status_badge(self, obj):
+        colours = {
+            'pending':          '#fef3c7;color:#92400e',
+            'approved':         '#d1fae5;color:#065f46',
+            'auto_approved':    '#d1fae5;color:#065f46',
+            'rejected':         '#fee2e2;color:#991b1b',
+            'escalated':        '#fef3c7;color:#78350f',
+            'executed':         '#dcfce7;color:#166534',
+            'execution_failed': '#fee2e2;color:#991b1b',
+        }
+        style = colours.get(obj.status, '#f5f5f5;color:#525252')
+        from django.utils.html import format_html
+        return format_html(
+            '<span style="background:{};padding:2px 8px;border-radius:999px;'
+            'font-size:0.72rem;font-weight:600;white-space:nowrap">{}</span>',
+            style, obj.get_status_display(),
+        )
+
+    def has_add_permission(self, request):
+        return False     # items enter via from_proposal() only
+
+    def has_delete_permission(self, request, obj=None):
+        return False     # append-only — never delete

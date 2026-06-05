@@ -2343,3 +2343,158 @@ class Provenance(models.Model):
     def __str__(self):
         snippet = self.summary[:40] + '…' if len(self.summary) > 40 else self.summary
         return f'[{self.source}] {snippet or "(no summary)"}'
+
+
+# ---------------------------------------------------------------------------
+# Step 42 — Approval queue
+# ---------------------------------------------------------------------------
+
+class ApprovalQueueItem(models.Model):
+    """One item in the per-department human-approval queue.
+
+    When a department agent proposes an action (e.g. "post this vendor
+    bill"), it serialises the Proposal into an ``ApprovalQueueItem`` and
+    waits. A human reviewer (or the auto-approval engine — Step 60) then
+    calls ``approve()`` or ``reject()``.  After approval the department's
+    ``execute()`` method runs and the status advances to ``executed``.
+
+    Append-only for the audit trail: never delete rows.  Use ``status`` to
+    filter the live queue.
+
+    ``chain_id`` threads this item to every other event in the same causal
+    chain (Step 44).  ``inputs`` + ``specialist_results`` carry the full
+    context the reviewer needs to make a decision.
+    """
+
+    STATUSES = [
+        ('pending',          'Pending — awaiting review'),
+        ('approved',         'Approved'),
+        ('auto_approved',    'Auto-approved'),
+        ('rejected',         'Rejected'),
+        ('escalated',        'Escalated — needs senior review'),
+        ('executed',         'Executed — posted to ERP'),
+        ('execution_failed', 'Execution failed'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='approval_queue_items',
+    )
+    dept_code = models.CharField(
+        max_length=12, choices=DEPARTMENT_CHOICES,
+        help_text='Department whose agent created this proposal.',
+    )
+    action = models.CharField(
+        max_length=255,
+        help_text='Human-readable description of the proposed action.',
+    )
+
+    # Serialised from the Proposal dataclass (Step 41)
+    inputs = models.JSONField(
+        default=dict, blank=True,
+        help_text='Event payload / extracted document that triggered the proposal.',
+    )
+    specialist_results = models.JSONField(
+        default=list, blank=True,
+        help_text='Outputs from each specialist in the pipeline (ok, output, error).',
+    )
+    chain_id = models.CharField(
+        max_length=64, blank=True, db_index=True,
+        help_text='UUID linking all events in the same causal chain (Step 44).',
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(
+        max_length=20, choices=STATUSES, default='pending', db_index=True,
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='approved_queue_items',
+        help_text='The human who approved or rejected this item.',
+    )
+    review_note = models.TextField(
+        blank=True,
+        help_text='Optional comment from the reviewer (required on rejection).',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant', 'dept_code', 'status']),
+            models.Index(fields=['tenant', 'status', '-created_at']),
+            models.Index(fields=['chain_id']),
+        ]
+
+    def __str__(self):
+        action_snippet = self.action[:50] + '…' if len(self.action) > 50 else self.action
+        return f'[{self.dept_code}] {action_snippet} ({self.get_status_display()})'
+
+    # ----- factory -----------------------------------------------------------
+
+    @classmethod
+    def from_proposal(cls, proposal, tenant):
+        """Build an unsaved ApprovalQueueItem from a Proposal dataclass.
+
+        ``tenant`` is passed explicitly because :class:`~agents.department.Proposal`
+        stores only ``tenant_id`` (an int) to avoid circular model imports.
+        """
+        return cls(
+            tenant=tenant,
+            dept_code=proposal.dept_code,
+            action=proposal.action,
+            inputs=proposal.inputs,
+            specialist_results=[
+                {
+                    'specialist_type': r.specialist_type,
+                    'output': r.output,
+                    'ok': r.ok,
+                    'error': r.error,
+                }
+                for r in proposal.specialist_results
+            ],
+            chain_id=proposal.chain_id,
+            metadata=proposal.metadata,
+            status='pending',
+        )
+
+    # ----- lifecycle ---------------------------------------------------------
+
+    def approve(self, user=None, note=''):
+        """Mark as approved, record the reviewer, and persist."""
+        self.status = 'approved'
+        self.reviewed_by = user
+        self.review_note = note
+        self.reviewed_at = timezone.now()
+        self.save(update_fields=['status', 'reviewed_by', 'review_note', 'reviewed_at'])
+
+    def reject(self, user=None, note=''):
+        """Mark as rejected, record the reviewer, and persist."""
+        self.status = 'rejected'
+        self.reviewed_by = user
+        self.review_note = note
+        self.reviewed_at = timezone.now()
+        self.save(update_fields=['status', 'reviewed_by', 'review_note', 'reviewed_at'])
+
+    def mark_executed(self):
+        """Mark as successfully executed (called after ERP write succeeds)."""
+        self.status = 'executed'
+        self.save(update_fields=['status'])
+
+    def mark_execution_failed(self, error: str = ''):
+        """Mark execution failed; append error to review_note if provided."""
+        self.status = 'execution_failed'
+        if error:
+            self.review_note = (self.review_note + '\n' + error).strip()
+        self.save(update_fields=['status', 'review_note'])
+
+    @property
+    def is_pending(self):
+        return self.status == 'pending'
+
+    @property
+    def is_approved(self):
+        return self.status in ('approved', 'auto_approved')

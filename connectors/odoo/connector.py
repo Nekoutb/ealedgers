@@ -2,9 +2,8 @@
 
 Wraps the low-level ``OdooClient`` (Step 29) in the capability contract. It
 declares the capabilities it has *implemented* — CAP.01 (read CoA), CAP.02
-(lookup/create partner), CAP.03 (post journal entry); CAP.17 (trial balance)
-lands in Step 33 — and self-registers under vendor ``"odoo"`` so the factory
-resolves it.
+(lookup/create partner), CAP.03 (post journal entry), CAP.17 (trial balance)
+— and self-registers under vendor ``"odoo"`` so the factory resolves it.
 
 CAP.01 (lookup chart of accounts) is implemented here. It reads ``code``,
 ``name``, ``account_type`` and ``active`` — all present on Odoo 17/18/19.
@@ -41,9 +40,8 @@ class OdooConnector(IConnector):
 
     @property
     def capabilities(self):
-        # Grows as Step 33 adds CAP.17 (trial balance). Declaring ==
-        # implemented keeps it honest.
-        return frozenset({"CAP.01", "CAP.02", "CAP.03"})
+        # Declaring == implemented keeps it honest.
+        return frozenset({"CAP.01", "CAP.02", "CAP.03", "CAP.17"})
 
     # ----- client (lazy) --------------------------------------------------
     @property
@@ -270,3 +268,110 @@ class OdooConnector(IConnector):
             raise ValueError(
                 "Account code(s) not found in Odoo: " + ", ".join(missing))
         return found
+
+    # ----- CAP.17: trial balance ------------------------------------------
+    TB_FIELDS = ["debit", "credit", "balance"]
+
+    def fetch_trial_balance(self, *, date_from=None, date_to=None,
+                            posted_only=True, journal_ids=None):
+        """Per-account debit/credit/balance totals — a trial balance.
+
+        Aggregates ``account.move.line`` (the version-tolerant way; Odoo's
+        report wizards differ per version). ``date_from`` / ``date_to`` bound
+        the period (``"YYYY-MM-DD"``, inclusive); ``posted_only`` (default)
+        excludes draft entries; ``journal_ids`` restricts to those journals.
+
+        Returns ``{date_from, date_to, posted_only, accounts, account_count,
+        total_debit, total_credit, balanced}`` where each account is
+        ``{external_id, code, name, account_type, debit, credit, balance}``,
+        sorted by code. A real ledger's TB balances (Σdebit == Σcredit).
+        """
+        self.require("CAP.17")
+        domain = self._tb_domain(date_from, date_to, posted_only, journal_ids)
+        sums = self._aggregate_move_lines(domain)
+        rows = self._enrich_tb_rows(sums)
+        total_debit = round(sum(r["debit"] for r in rows), 2)
+        total_credit = round(sum(r["credit"] for r in rows), 2)
+        return {
+            "date_from": date_from,
+            "date_to": date_to,
+            "posted_only": posted_only,
+            "accounts": rows,
+            "account_count": len(rows),
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+            "balanced": total_debit == total_credit,
+        }
+
+    @staticmethod
+    def _tb_domain(date_from, date_to, posted_only, journal_ids):
+        domain = []
+        if posted_only:
+            domain.append(["parent_state", "=", "posted"])
+        if date_from:
+            domain.append(["date", ">=", date_from])
+        if date_to:
+            domain.append(["date", "<=", date_to])
+        if journal_ids:
+            domain.append(["journal_id", "in", list(journal_ids)])
+        return domain
+
+    def _aggregate_move_lines(self, domain):
+        """Return ``{account_id: {debit, credit, balance}}``. Prefers Odoo
+        17+ ``formatted_read_group``; falls back to reading the lines and
+        summing in Python (equivalent result; works on any Odoo version)."""
+        try:
+            groups = self.client.formatted_read_group(
+                "account.move.line", domain=domain, groupby=["account_id"],
+                aggregates=[f"{f}:sum" for f in self.TB_FIELDS])
+            out = {}
+            for g in groups:
+                acc = g.get("account_id")
+                if not acc:
+                    continue          # the "no account" bucket — skip
+                out[acc[0]] = {f: g.get(f"{f}:sum") or 0.0
+                               for f in self.TB_FIELDS}
+            return out
+        except Exception:
+            # formatted_read_group absent (older Odoo) or refused — aggregate
+            # the raw lines instead. Same numbers, just less efficient.
+            return self._aggregate_via_search_read(domain)
+
+    def _aggregate_via_search_read(self, domain):
+        lines = self.client.search_read(
+            "account.move.line", domain=domain,
+            fields=["account_id"] + self.TB_FIELDS)
+        out = {}
+        for ln in lines:
+            acc = ln.get("account_id")
+            if not acc:
+                continue
+            slot = out.setdefault(
+                acc[0], {f: 0.0 for f in self.TB_FIELDS})
+            for f in self.TB_FIELDS:
+                slot[f] += ln.get(f) or 0.0
+        return out
+
+    def _enrich_tb_rows(self, sums):
+        """Attach code / name / account_type to each aggregated account."""
+        if not sums:
+            return []
+        ids = list(sums.keys())
+        accts = self.client.search_read(
+            "account.account", domain=[["id", "in", ids]],
+            fields=["id", "code", "name", "account_type"])
+        meta = {a["id"]: a for a in accts}
+        rows = []
+        for aid, s in sums.items():
+            a = meta.get(aid, {})
+            rows.append({
+                "external_id": aid,
+                "code": a.get("code"),
+                "name": a.get("name"),
+                "account_type": a.get("account_type"),
+                "debit": round(s["debit"], 2),
+                "credit": round(s["credit"], 2),
+                "balance": round(s["balance"], 2),
+            })
+        rows.sort(key=lambda r: (r["code"] or ""))
+        return rows

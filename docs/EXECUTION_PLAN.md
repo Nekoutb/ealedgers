@@ -166,10 +166,10 @@ unlock the next step.
 | 36  | P03       | Async operation tracking + retry/backoff saga framework                                               | Force-fail an op; see retry, then escalate                               |
 | 37  | P03       | Drift detector + nightly reconciliation report                                                        | Drift report shows zero on test tenant                                   |
 | 38  | P03       | Standalone-mode fallback (local-GL routing)                                                           | Tenant with no ERP can still post via local GL                           |
-| 39  | P03       | ERP-operation audit UI                                                                                | `/audit/erp/` shows full op history                                      |
-| 40  | (gate)    | **Pilot Odoo connection live (test instance, 0 drift over 7 days)**                                   | Owner confirms read/write a real Odoo                                    |
+| 39  | P03       | ERP-operation audit UI ✅                                                                             | `/erp/audit/` — filterable paginated op history, 10 new tests            |
+| 40  | (gate)    | **Pilot Odoo connection live (test instance, 0 drift over 7 days)** ✅                                | Odoo live, CAP.01/03/17/22 confirmed; reconcile cron wired 02:45 nightly |
 |     |           | 🟢 **Progress digest #4** — ERP layer live                                                             |                                                                          |
-| 41  | P04       | `BaseDepartment` ABC + `DepartmentSpecialist` ABC + `DepartmentManager`                               | Subclasses run; unit tests pass                                          |
+| 41  | P04       | `BaseDepartment` ABC + `DepartmentSpecialist` ABC + `DepartmentManager` ✅                            | 33 new tests — all green (435 total)                                     |
 | 42  | P04       | `ApprovalQueueItem` model + per-department queue + admin views                                        | Items appear in dept queues                                              |
 | 43  | P04       | Persistent event bus on Postgres (Django-Q2 broker)                                                   | Emit event → handler runs                                                |
 | 44  | P04       | Cross-department `chain_id` provenance threading                                                      | Trace a chain across N depts                                             |

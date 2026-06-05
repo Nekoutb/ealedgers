@@ -2292,3 +2292,85 @@ class ERPConnectionConfigViewTests(TestCase):
     def test_create_requires_login(self):
         self.client.logout()
         self.assertEqual(self.client.get("/erp/new/").status_code, 302)
+
+
+# ---------------------------------------------------------------------------
+# Step 35 — capability matrix + nightly health-check
+# ---------------------------------------------------------------------------
+
+from django.core.management import call_command  # noqa: E402
+
+
+class CapabilityMatrixViewTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(
+            "cm_u", "c@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="cm-t", name="CM T", currency=cls.xaf)
+        Membership.objects.create(user=cls.user, tenant=cls.t, role="owner")
+        cls.conn = ERPConnection.objects.create(
+            tenant=cls.t, name="Acme Odoo", vendor="odoo",
+            capabilities=["CAP.01", "CAP.17"], health="ok")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_matrix_renders_with_caps(self):
+        r = self.client.get("/erp/capabilities/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Capability Matrix")
+        self.assertContains(r, "CAP.01")
+        self.assertContains(r, "CAP.22")          # the whole registry is listed
+        self.assertContains(r, "Acme Odoo")
+        self.assertContains(r, "2/23")            # supported / total
+        self.assertEqual(r.context["total_caps"], 23)
+
+    def test_matrix_supported_flags(self):
+        r = self.client.get("/erp/capabilities/")
+        rows = {row["cap"].code: row for row in r.context["rows"]}
+        self.assertTrue(rows["CAP.01"]["any"])
+        self.assertTrue(rows["CAP.17"]["any"])
+        self.assertFalse(rows["CAP.03"]["any"])   # not reported by this conn
+
+    def test_cross_tenant_isolation(self):
+        other = Tenant.objects.create(
+            slug="cm-other", name="Other", currency=self.xaf)
+        ERPConnection.objects.create(
+            tenant=other, name="Secret ERP", vendor="odoo",
+            capabilities=["CAP.01"])
+        r = self.client.get("/erp/capabilities/")
+        self.assertNotContains(r, "Secret ERP")
+        self.assertEqual(len(r.context["conn_rows"]), 1)
+
+    def test_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get("/erp/capabilities/").status_code, 302)
+
+
+class HealthcheckConnectionsCommandTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t1 = Tenant.objects.create(slug="hc-one", name="HC One", currency=cls.xaf)
+        cls.t2 = Tenant.objects.create(slug="hc-two", name="HC Two", currency=cls.xaf)
+
+    def test_refreshes_health_and_caps(self):
+        # vendor=manual -> NullConnector (offline). Stale values get overwritten.
+        c = ERPConnection.objects.create(
+            tenant=self.t1, name="Standalone", vendor="manual",
+            capabilities=["CAP.99"], health="ok")
+        call_command("healthcheck_connections")
+        c.refresh_from_db()
+        self.assertIsNotNone(c.last_healthcheck_at)     # it ran + persisted
+        self.assertEqual(c.capabilities, [])            # refreshed (NullConnector)
+        self.assertEqual(c.health, "unconfigured")      # refreshed
+
+    def test_tenant_filter_scopes(self):
+        c1 = ERPConnection.objects.create(tenant=self.t1, name="A", vendor="manual")
+        c2 = ERPConnection.objects.create(tenant=self.t2, name="B", vendor="manual")
+        call_command("healthcheck_connections", tenant="hc-one")
+        c1.refresh_from_db()
+        c2.refresh_from_db()
+        self.assertIsNotNone(c1.last_healthcheck_at)
+        self.assertIsNone(c2.last_healthcheck_at)       # out of scope, untouched

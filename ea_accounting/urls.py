@@ -6,6 +6,7 @@ from django.urls import include, path
 
 from accounting.views import (
     agent_activity,
+    capability_matrix,
     departments,
     erp_connection_create,
     erp_connection_edit,
@@ -38,6 +39,7 @@ urlpatterns = [
     path('departments/', departments, name='departments'),
     path('agents/', agent_activity, name='agent_activity'),
     path('erp/', erp_connections, name='erp_connections'),
+    path('erp/capabilities/', capability_matrix, name='erp_capabilities'),
     path('erp/new/', erp_connection_create, name='erp_connection_create'),
     path('erp/<int:pk>/edit/', erp_connection_edit, name='erp_connection_edit'),
     # Knowledge layer (retrieval API + rule explorer + tenant procedures)

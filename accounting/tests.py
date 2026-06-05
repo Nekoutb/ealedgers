@@ -2471,3 +2471,86 @@ class SagaRunnerTests(TestCase):
         self.assertEqual(op.method, "account.move.create")
         self.assertEqual(op.request, {"x": 1})
         self.assertEqual(op.connection, self.conn)
+
+
+# ---------------------------------------------------------------------------
+# Step 37 — drift detector + reconciliation report
+# ---------------------------------------------------------------------------
+
+from accounting.reconciliation import (  # noqa: E402
+    ReconciliationReport, reconcile_connection,
+)
+
+
+class ReconciliationTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="rec-t", name="Rec T", currency=cls.xaf)
+        cls.conn = ERPConnection.objects.create(
+            tenant=cls.t, name="Odoo", vendor="odoo", health="ok")
+
+    def _op(self, external_id, status="success"):
+        return ERPOperation.objects.create(
+            tenant=self.t, connection=self.conn, capability="CAP.03",
+            status=status,
+            external_ids={"external_id": external_id} if external_id else {})
+
+    def test_no_recorded_ops_is_clean(self):
+        # The "test tenant" case: nothing posted by us -> zero drift, no ERP read.
+        called = {"n": 0}
+
+        def read_states(ids):
+            called["n"] += 1
+            return {}
+
+        report = reconcile_connection(self.conn, read_states=read_states)
+        self.assertEqual(report.checked, 0)
+        self.assertTrue(report.clean)
+        self.assertEqual(report.drift_count, 0)
+        self.assertEqual(called["n"], 0)        # ERP not read when nothing recorded
+
+    def test_all_matched(self):
+        self._op(101)
+        self._op(102)
+        report = reconcile_connection(
+            self.conn, read_states=lambda ids: {101: "posted", 102: "posted"})
+        self.assertEqual(report.checked, 2)
+        self.assertEqual(report.matched, 2)
+        self.assertTrue(report.clean)
+
+    def test_missing_in_erp_is_drift(self):
+        self._op(201)
+        self._op(202)
+        report = reconcile_connection(
+            self.conn, read_states=lambda ids: {201: "posted"})  # 202 gone
+        self.assertEqual(report.matched, 1)
+        self.assertEqual(report.missing_in_erp, [202])
+        self.assertFalse(report.clean)
+        self.assertEqual(report.drift_count, 1)
+
+    def test_mismatched_state_is_drift(self):
+        self._op(301)
+        report = reconcile_connection(
+            self.conn, read_states=lambda ids: {301: "draft"})  # un-posted!
+        self.assertEqual(report.mismatched, [{"external_id": 301, "state": "draft"}])
+        self.assertFalse(report.clean)
+
+    def test_untracked_in_erp_is_informational_not_drift(self):
+        self._op(401)
+        report = reconcile_connection(
+            self.conn,
+            read_states=lambda ids: {401: "posted"},
+            list_posted_ids=lambda: [401, 402, 403])  # 402/403 human-posted
+        self.assertEqual(report.matched, 1)
+        self.assertEqual(report.untracked_in_erp, [402, 403])
+        self.assertTrue(report.clean)            # untracked is NOT drift
+        self.assertEqual(report.drift_count, 0)
+
+    def test_only_successful_ops_counted(self):
+        self._op(501, status="failed")           # a failed op carries no truth
+        self._op(502, status="escalated")
+        report = reconcile_connection(
+            self.conn, read_states=lambda ids: {})
+        self.assertEqual(report.checked, 0)       # neither is a recorded write
+        self.assertTrue(report.clean)

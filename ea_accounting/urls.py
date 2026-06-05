@@ -11,6 +11,7 @@ from accounting.views import (
     erp_connection_create,
     erp_connection_edit,
     erp_connections,
+    erp_operation_audit,
     signup,
     switch_tenant_view,
     workspace,
@@ -40,6 +41,7 @@ urlpatterns = [
     path('agents/', agent_activity, name='agent_activity'),
     path('erp/', erp_connections, name='erp_connections'),
     path('erp/capabilities/', capability_matrix, name='erp_capabilities'),
+    path('erp/audit/', erp_operation_audit, name='erp_operation_audit'),
     path('erp/new/', erp_connection_create, name='erp_connection_create'),
     path('erp/<int:pk>/edit/', erp_connection_edit, name='erp_connection_edit'),
     # Knowledge layer (retrieval API + rule explorer + tenant procedures)

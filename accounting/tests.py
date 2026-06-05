@@ -2554,3 +2554,131 @@ class ReconciliationTests(TestCase):
             self.conn, read_states=lambda ids: {})
         self.assertEqual(report.checked, 0)       # neither is a recorded write
         self.assertTrue(report.clean)
+
+
+# ---------------------------------------------------------------------------
+# Step 38 — standalone local-GL connector + tenant routing
+# ---------------------------------------------------------------------------
+
+from accounting.local_gl import LocalGLConnector, connector_for_tenant  # noqa: E402
+
+
+class LocalGLConnectorTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="lgl-t", name="LGL T", currency=cls.xaf)
+        cls.cash = Account.objects.create(
+            tenant=cls.t, code="521100", name="Bank", type="asset_cash")
+        cls.sales = Account.objects.create(
+            tenant=cls.t, code="701100", name="Sales", type="income")
+        cls.old = Account.objects.create(
+            tenant=cls.t, code="999999", name="Old", type="expense",
+            deprecated=True)
+        cls.jrnl = Journal.objects.create(
+            tenant=cls.t, name="Miscellaneous", code="OD", type="general",
+            sequence_prefix="OD/")
+
+    def _conn(self):
+        return LocalGLConnector(self.t)
+
+    _SALE = [
+        {"account_code": "521100", "debit": 1000, "credit": 0, "name": "Cash in"},
+        {"account_code": "701100", "debit": 0, "credit": 1000, "name": "Revenue"},
+    ]
+
+    def test_capabilities_and_health(self):
+        c = self._conn()
+        self.assertEqual(c.capabilities, frozenset({"CAP.01", "CAP.03", "CAP.17"}))
+        self.assertTrue(c.health_check().ok)
+
+    def test_lookup_chart_of_accounts_excludes_deprecated(self):
+        out = self._conn().lookup_chart_of_accounts()
+        codes = [a["code"] for a in out]
+        self.assertIn("521100", codes)
+        self.assertNotIn("999999", codes)          # deprecated excluded
+        self.assertEqual(out[0]["account_type"], "asset_cash")  # ordered by code
+
+    def test_post_draft_by_default(self):
+        res = self._conn().post_journal_entry(
+            lines=self._SALE, date="2026-06-05", ref="T1", journal_code="OD")
+        self.assertEqual(res["state"], "draft")
+        self.assertFalse(res["posted"])
+        self.assertTrue(res["balanced"])
+        entry = JournalEntry.objects.get(pk=res["external_id"])
+        self.assertEqual(entry.state, "draft")
+        self.assertEqual(entry.lines.count(), 2)
+        self.assertEqual(entry.tenant, self.t)
+
+    def test_post_true_posts_and_names_entry(self):
+        res = self._conn().post_journal_entry(
+            lines=self._SALE, date="2026-06-05", ref="T2", journal_code="OD",
+            post=True)
+        self.assertEqual(res["state"], "posted")
+        entry = JournalEntry.objects.get(pk=res["external_id"])
+        self.assertEqual(entry.state, "posted")
+        self.assertTrue(entry.name.startswith("OD/"))   # journal sequence
+        self.assertIsNotNone(entry.posted_at)
+
+    def test_unbalanced_rejected_no_write(self):
+        with self.assertRaises(ValueError):
+            self._conn().post_journal_entry(
+                lines=[{"account_code": "521100", "debit": 100, "credit": 0},
+                       {"account_code": "701100", "debit": 0, "credit": 90}],
+                date="2026-06-05", journal_code="OD")
+        self.assertEqual(JournalEntry.objects.for_tenant(self.t).count(), 0)
+
+    def test_unknown_account_rejected_no_write(self):
+        with self.assertRaises(ValueError):
+            self._conn().post_journal_entry(
+                lines=[{"account_code": "000000", "debit": 10, "credit": 0},
+                       {"account_code": "701100", "debit": 0, "credit": 10}],
+                date="2026-06-05", journal_code="OD")
+        self.assertEqual(JournalEntry.objects.for_tenant(self.t).count(), 0)
+
+    def test_unknown_journal_rejected(self):
+        with self.assertRaises(ValueError):
+            self._conn().post_journal_entry(
+                lines=self._SALE, date="2026-06-05", journal_code="NOPE")
+
+    def test_trial_balance_from_posted_entries(self):
+        c = self._conn()
+        c.post_journal_entry(lines=self._SALE, date="2026-06-05",
+                             journal_code="OD", post=True)
+        c.post_journal_entry(   # a draft — must NOT appear in the TB
+            lines=self._SALE, date="2026-06-05", journal_code="OD", post=False)
+        tb = c.fetch_trial_balance()
+        self.assertTrue(tb["balanced"])
+        self.assertEqual(tb["total_debit"], 1000.0)     # only the posted one
+        self.assertEqual(tb["total_credit"], 1000.0)
+        by_code = {r["code"]: r for r in tb["accounts"]}
+        self.assertEqual(by_code["521100"]["balance"], 1000.0)
+        self.assertEqual(by_code["701100"]["balance"], -1000.0)
+
+
+class ConnectorRoutingTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.standalone = Tenant.objects.create(
+            slug="route-standalone", name="Standalone", currency=cls.xaf)
+        cls.manual_only = Tenant.objects.create(
+            slug="route-manual", name="Manual Only", currency=cls.xaf)
+        ERPConnection.objects.create(
+            tenant=cls.manual_only, name="None", vendor="manual", is_active=True)
+        cls.with_odoo = Tenant.objects.create(
+            slug="route-odoo", name="Has Odoo", currency=cls.xaf)
+        ERPConnection.objects.create(
+            tenant=cls.with_odoo, name="Odoo", vendor="odoo", is_active=True,
+            config={"url": "https://x.odoo.com", "db": "x", "username": "u"})
+
+    def test_no_connection_routes_to_local(self):
+        self.assertIsInstance(connector_for_tenant(self.standalone), LocalGLConnector)
+
+    def test_manual_only_routes_to_local(self):
+        self.assertIsInstance(connector_for_tenant(self.manual_only), LocalGLConnector)
+
+    def test_odoo_connection_routes_to_erp(self):
+        c = connector_for_tenant(self.with_odoo)
+        self.assertEqual(c.vendor, "odoo")
+        self.assertNotIsInstance(c, LocalGLConnector)

@@ -10,6 +10,7 @@ from .models import (
     AgentToolCall,
     ApprovalQueueItem,
     BankStatement,
+    BusEvent,
     BankStatementLine,
     Company,
     CustomerInvoice,
@@ -1083,3 +1084,70 @@ class ApprovalQueueItemAdmin(TenantAwareAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False     # append-only — never delete
+
+
+# ---------------------------------------------------------------------------
+# Step 43 — Event bus
+# ---------------------------------------------------------------------------
+
+@admin.register(BusEvent)
+class BusEventAdmin(TenantAwareAdmin):
+    """Read-only view of every event emitted on the event bus for this tenant."""
+
+    list_display = (
+        'event_type', 'status_badge', 'handler_count',
+        'chain_id_short', 'created_at', 'dispatched_at',
+    )
+    list_filter = ('status', 'event_type')
+    search_fields = ('event_type', 'chain_id', 'error', 'task_id')
+    readonly_fields = (
+        'tenant', 'event_type', 'payload', 'chain_id', 'metadata',
+        'status', 'handler_count', 'error', 'task_id',
+        'created_at', 'dispatched_at',
+    )
+    list_select_related = ('tenant',)
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        (None, {
+            'fields': ('tenant', 'event_type', 'status', 'chain_id'),
+        }),
+        ('Payload', {
+            'fields': ('payload', 'metadata'),
+            'classes': ('collapse',),
+        }),
+        ('Dispatch', {
+            'fields': ('handler_count', 'task_id', 'error'),
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'dispatched_at'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    @admin.display(description='Status')
+    def status_badge(self, obj):
+        colours = {
+            'queued':     '#fef3c7;color:#92400e',
+            'dispatched': '#d1fae5;color:#065f46',
+            'failed':     '#fee2e2;color:#991b1b',
+        }
+        style = colours.get(obj.status, '#f5f5f5;color:#525252')
+        from django.utils.html import format_html
+        return format_html(
+            '<span style="background:{};padding:2px 8px;border-radius:999px;'
+            'font-size:0.72rem;font-weight:600;white-space:nowrap">{}</span>',
+            style, obj.get_status_display(),
+        )
+
+    @admin.display(description='Chain ID')
+    def chain_id_short(self, obj):
+        if not obj.chain_id:
+            return '—'
+        return obj.chain_id[:12] + '…' if len(obj.chain_id) > 12 else obj.chain_id
+
+    def has_add_permission(self, request):
+        return False   # BusEvents are created only via agents.events.emit()
+
+    def has_delete_permission(self, request, obj=None):
+        return False   # append-only — never delete

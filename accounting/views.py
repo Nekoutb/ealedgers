@@ -28,6 +28,7 @@ from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     AgentRun,
     ERPConnection,
+    ERPOperation,
     SUBSCRIBABLE_DEPARTMENTS,
 )
 
@@ -328,3 +329,65 @@ def erp_connection_edit(request, pk):
     return render(request, "accounting/erp_connection_form.html", {
         "page_name": "ERP Connections", "form": form, "mode": "edit",
         "connection": conn})
+
+
+# ---------------------------------------------------------------------------
+# Step 39 — ERP-operation audit log
+# ---------------------------------------------------------------------------
+
+@login_required
+@tenant_required
+def erp_operation_audit(request):
+    """Full ERP-operation history for the current tenant — filterable,
+    paginated. Read-only audit trail of every capability invocation."""
+    from django.core.paginator import Paginator
+
+    qs = (ERPOperation.objects.for_tenant(request.tenant)
+          .select_related("connection")
+          .order_by("-started_at"))
+
+    # --- filters ---
+    status_filter = request.GET.get("status", "")
+    cap_filter = request.GET.get("cap", "")
+    conn_filter = request.GET.get("conn", "")
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if cap_filter:
+        qs = qs.filter(capability=cap_filter)
+    if conn_filter:
+        try:
+            qs = qs.filter(connection_id=int(conn_filter))
+        except (ValueError, TypeError):
+            pass
+
+    # --- filter option lists ---
+    connections = ERPConnection.objects.for_tenant(request.tenant)
+    cap_choices = sorted(
+        ERPOperation.objects.for_tenant(request.tenant)
+        .values_list("capability", flat=True)
+        .distinct()
+    )
+
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get("page", 1))
+
+    # build query string for pagination links (preserve active filters)
+    filter_qs = "&".join(
+        f"{k}={v}"
+        for k, v in [("status", status_filter), ("cap", cap_filter), ("conn", conn_filter)]
+        if v
+    )
+
+    return render(request, "accounting/erp_operation_audit.html", {
+        "page_name": "ERP Connections",
+        "page": page,
+        "total": paginator.count,
+        "status_filter": status_filter,
+        "cap_filter": cap_filter,
+        "conn_filter": conn_filter,
+        "connections": connections,
+        "status_choices": ERPOperation.STATUSES,
+        "cap_choices": cap_choices,
+        "filter_qs": filter_qs,
+    })

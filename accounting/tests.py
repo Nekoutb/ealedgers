@@ -2682,3 +2682,118 @@ class ConnectorRoutingTests(TestCase):
         c = connector_for_tenant(self.with_odoo)
         self.assertEqual(c.vendor, "odoo")
         self.assertNotIsInstance(c, LocalGLConnector)
+
+
+# ---------------------------------------------------------------------------
+# Step 39 — ERP-operation audit UI
+# ---------------------------------------------------------------------------
+
+class ERPOperationAuditViewTests(TestCase):
+    """Tests for /erp/audit/ — the per-tenant ERP-operation audit log."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.user = User.objects.create_user("au_user", "au@a.test", "pw123456")
+        cls.xaf = Currency.objects.create(code="XAF_AU", name="CFA AU", decimal_places=0)
+        cls.tenant = Tenant.objects.create(
+            slug="au-tenant", name="AU SARL", currency=cls.xaf)
+        Membership.objects.create(user=cls.user, tenant=cls.tenant, role="owner")
+        cls.conn = ERPConnection.objects.create(
+            tenant=cls.tenant, name="Odoo AU", vendor="odoo", health="ok",
+            capabilities=["CAP.03"])
+
+        # seed some operations across statuses / capabilities
+        ERPOperation.objects.create(
+            tenant=cls.tenant, connection=cls.conn,
+            capability="CAP.03", method="account.move.create",
+            status="success", external_ids={"external_id": 999},
+        )
+        ERPOperation.objects.create(
+            tenant=cls.tenant, connection=cls.conn,
+            capability="CAP.01", status="failed",
+            error="RPC fault: access denied",
+        )
+        ERPOperation.objects.create(
+            tenant=cls.tenant, connection=cls.conn,
+            capability="CAP.03", status="escalated",
+            retry_count=3, error="Timeout",
+        )
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["active_tenant_slug"] = "au-tenant"
+        session.save()
+
+    def test_page_renders(self):
+        r = self.client.get("/erp/audit/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "ERP Operation Audit Log")
+        self.assertContains(r, "CAP.03")
+        self.assertContains(r, "Odoo AU")
+
+    def test_total_count_in_context(self):
+        r = self.client.get("/erp/audit/")
+        self.assertEqual(r.context["total"], 3)
+
+    def test_filter_by_status(self):
+        r = self.client.get("/erp/audit/?status=success")
+        self.assertEqual(r.status_code, 200)
+        # Only the one success row
+        self.assertEqual(r.context["page"].paginator.count, 1)
+        # The row-level class audit-row--success appears for the matched row;
+        # audit-row--escalated only appears when an escalated row is rendered.
+        # (CSS defines .audit-status--* selectors regardless of filter, so we
+        # check the row class, not the badge class.)
+        self.assertContains(r, "audit-row--success")
+        self.assertNotContains(r, "audit-row--escalated")
+
+    def test_filter_by_capability(self):
+        r = self.client.get("/erp/audit/?cap=CAP.01")
+        self.assertEqual(r.context["page"].paginator.count, 1)
+        self.assertContains(r, "CAP.01")
+
+    def test_filter_by_connection(self):
+        r = self.client.get(f"/erp/audit/?conn={self.conn.pk}")
+        self.assertEqual(r.context["page"].paginator.count, 3)
+
+    def test_cross_tenant_isolation(self):
+        """Operations from another tenant must not appear."""
+        other = Tenant.objects.create(slug="au-other", name="Other", currency=self.xaf)
+        other_conn = ERPConnection.objects.create(
+            tenant=other, name="Secret", vendor="odoo")
+        ERPOperation.objects.create(
+            tenant=other, connection=other_conn,
+            capability="CAP.17", status="success",
+        )
+        r = self.client.get("/erp/audit/")
+        self.assertNotContains(r, "Secret")
+        # Total count still 3 (our tenant's ops only)
+        self.assertEqual(r.context["total"], 3)
+
+    def test_error_text_displayed(self):
+        r = self.client.get("/erp/audit/?status=failed")
+        self.assertContains(r, "access denied")
+
+    def test_external_id_displayed(self):
+        r = self.client.get("/erp/audit/?status=success")
+        self.assertContains(r, "999")
+
+    def test_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get("/erp/audit/").status_code, 302)
+
+    def test_empty_state_no_filters(self):
+        """A tenant with no ops sees the no-ops empty state."""
+        User = get_user_model()
+        user2 = User.objects.create_user("au_empty", "au2@a.test", "pw123456")
+        empty_t = Tenant.objects.create(slug="au-empty", name="Empty", currency=self.xaf)
+        Membership.objects.create(user=user2, tenant=empty_t, role="owner")
+        self.client.force_login(user2)
+        session = self.client.session
+        session["active_tenant_slug"] = "au-empty"
+        session.save()
+        r = self.client.get("/erp/audit/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "No ERP operations recorded yet")

@@ -1,0 +1,265 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}ERP Audit Log · EA Ledgers{% endblock %}
+
+{% block content %}
+<section class="audit">
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header class="audit-head">
+    <div>
+      <div class="audit-eyebrow">Integrations</div>
+      <h1 class="audit-title">ERP Operation Audit Log</h1>
+      <p class="audit-lede">Every capability invocation made against a connected ERP — successful
+        writes, retries, failures, and escalations. Read-only.
+        <a class="audit-back" href="{% url 'erp_connections' %}">← Back to connections</a></p>
+    </div>
+    <div class="audit-count">
+      <span class="audit-count-num">{{ total|default:"0" }}</span>
+      <span class="audit-count-label">operation{{ total|pluralize }}</span>
+    </div>
+  </header>
+
+  <!-- ── Filter bar ─────────────────────────────────────────────────── -->
+  <form class="audit-filters" method="get" action="{% url 'erp_operation_audit' %}">
+    <div class="audit-filter-group">
+      <label class="audit-filter-label" for="f-status">Status</label>
+      <select id="f-status" name="status" class="audit-select">
+        <option value="">All statuses</option>
+        {% for code, label in status_choices %}
+          <option value="{{ code }}"{% if status_filter == code %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {% if cap_choices %}
+    <div class="audit-filter-group">
+      <label class="audit-filter-label" for="f-cap">Capability</label>
+      <select id="f-cap" name="cap" class="audit-select">
+        <option value="">All capabilities</option>
+        {% for cap in cap_choices %}
+          <option value="{{ cap }}"{% if cap_filter == cap %} selected{% endif %}>{{ cap }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    {% if connections %}
+    <div class="audit-filter-group">
+      <label class="audit-filter-label" for="f-conn">Connection</label>
+      <select id="f-conn" name="conn" class="audit-select">
+        <option value="">All connections</option>
+        {% for c in connections %}
+          <option value="{{ c.pk }}"{% if conn_filter == c.pk|stringformat:"s" %} selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    <div class="audit-filter-actions">
+      <button type="submit" class="audit-btn-filter">Filter</button>
+      {% if status_filter or cap_filter or conn_filter %}
+        <a href="{% url 'erp_operation_audit' %}" class="audit-btn-reset">Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <!-- ── Table ──────────────────────────────────────────────────────── -->
+  {% if page.object_list %}
+    <div class="audit-table-wrap">
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Connection</th>
+            <th>Capability</th>
+            <th>Status</th>
+            <th>Method</th>
+            <th>Retries</th>
+            <th>Duration</th>
+            <th>External ID</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for op in page.object_list %}
+          <tr class="audit-row audit-row--{{ op.status }}">
+            <td class="audit-td-time">
+              <span class="audit-ts">{{ op.started_at|date:"Y-m-d" }}</span>
+              <span class="audit-ts-time">{{ op.started_at|time:"H:i:s" }}</span>
+            </td>
+            <td>
+              <span class="audit-connname">{{ op.connection.name }}</span>
+              <span class="audit-vendor">{{ op.connection.get_vendor_display }}</span>
+            </td>
+            <td>
+              <span class="audit-cap">{{ op.capability }}</span>
+            </td>
+            <td>
+              <span class="audit-status audit-status--{{ op.status }}">{{ op.get_status_display }}</span>
+            </td>
+            <td class="audit-td-method">
+              {% if op.method %}
+                <code class="audit-code">{{ op.method|truncatechars:40 }}</code>
+              {% else %}
+                <span class="audit-none">—</span>
+              {% endif %}
+            </td>
+            <td class="audit-td-num">
+              {% if op.retry_count %}
+                <span class="audit-retry">{{ op.retry_count }}</span>
+              {% else %}
+                <span class="audit-none">0</span>
+              {% endif %}
+            </td>
+            <td class="audit-td-num">
+              {% if op.completed_at %}
+                {% with dur=op.completed_at|timeuntil:op.started_at %}
+                  <span class="audit-dur">{{ dur }}</span>
+                {% endwith %}
+              {% else %}
+                <span class="audit-none">—</span>
+              {% endif %}
+            </td>
+            <td class="audit-td-eid">
+              {% if op.external_ids %}
+                {% for k, v in op.external_ids.items %}
+                  <span class="audit-eid">{{ k }}: {{ v }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="audit-none">—</span>
+              {% endif %}
+            </td>
+            <td class="audit-td-err">
+              {% if op.error %}
+                <span class="audit-err" title="{{ op.error }}">{{ op.error|truncatechars:80 }}</span>
+              {% else %}
+                <span class="audit-none">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Pagination ───────────────────────────────────────────────── -->
+    {% if page.has_other_pages %}
+    <nav class="audit-pager" aria-label="Pagination">
+      {% if page.has_previous %}
+        <a class="audit-pager-btn" href="?{% if filter_qs %}{{ filter_qs }}&{% endif %}page={{ page.previous_page_number }}">← Previous</a>
+      {% else %}
+        <span class="audit-pager-btn audit-pager-btn--off">← Previous</span>
+      {% endif %}
+      <span class="audit-pager-info">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}
+        <a class="audit-pager-btn" href="?{% if filter_qs %}{{ filter_qs }}&{% endif %}page={{ page.next_page_number }}">Next →</a>
+      {% else %}
+        <span class="audit-pager-btn audit-pager-btn--off">Next →</span>
+      {% endif %}
+    </nav>
+    {% endif %}
+
+  {% else %}
+    <!-- ── Empty state ──────────────────────────────────────────────── -->
+    <div class="audit-empty">
+      <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 12l2 2 4-4"/>
+        <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"/>
+      </svg>
+      {% if status_filter or cap_filter or conn_filter %}
+        <h2>No operations match the current filters</h2>
+        <p>Try clearing the filters to see all operations.</p>
+        <a class="audit-cta" href="{% url 'erp_operation_audit' %}">Clear filters</a>
+      {% else %}
+        <h2>No ERP operations recorded yet</h2>
+        <p>Operations appear here once the agents or connectors invoke capabilities against a
+           connected ERP. Until then, the audit trail is empty.</p>
+        <a class="audit-cta" href="{% url 'erp_connections' %}">View ERP connections</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ── Palette & base ────────────────────────────────────────────── */
+  .audit{--ink:#0a0a0a;--muted:#737373;--hair:#e5e5e5;--brand:#2E8B8E;--red:#b91c1c;--amber:#b45309;--green:#047857;--purple:#6d28d9;color:var(--ink);}
+
+  /* ── Header ────────────────────────────────────────────────────── */
+  .audit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;padding-bottom:1.3rem;border-bottom:1px solid var(--hair);}
+  .audit-eyebrow{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:600;}
+  .audit-title{font-size:2.1rem;line-height:1.05;font-weight:650;letter-spacing:-.02em;margin:.3rem 0 .2rem;}
+  .audit-lede{color:var(--muted);max-width:62ch;font-size:.95rem;line-height:1.55;}
+  .audit-back{color:var(--brand);font-weight:600;text-decoration:none;font-size:.88rem;}
+  .audit-back:hover{text-decoration:underline;text-underline-offset:3px;}
+  .audit-count{text-align:right;padding-top:.4rem;}
+  .audit-count-num{display:block;font-size:2rem;font-weight:700;line-height:1;letter-spacing:-.03em;}
+  .audit-count-label{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;}
+
+  /* ── Filter bar ─────────────────────────────────────────────────── */
+  .audit-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.7rem;padding:1rem 0;border-bottom:1px solid var(--hair);margin-bottom:.2rem;}
+  .audit-filter-group{display:flex;flex-direction:column;gap:.25rem;}
+  .audit-filter-label{font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .audit-select{border:1px solid var(--hair);border-radius:9px;padding:.45rem .75rem;font-size:.85rem;background:#fff;color:var(--ink);cursor:pointer;min-width:160px;}
+  .audit-select:focus{outline:2px solid var(--brand);outline-offset:2px;}
+  .audit-filter-actions{display:flex;align-items:center;gap:.5rem;margin-left:.3rem;}
+  .audit-btn-filter{background:#0a0a0a;color:#fff;font-weight:600;font-size:.84rem;padding:.45rem 1rem;border:none;border-radius:9px;cursor:pointer;}
+  .audit-btn-filter:hover{background:#262626;}
+  .audit-btn-reset{color:var(--muted);font-size:.84rem;font-weight:500;text-decoration:none;}
+  .audit-btn-reset:hover{color:var(--ink);}
+
+  /* ── Table wrapper ──────────────────────────────────────────────── */
+  .audit-table-wrap{overflow-x:auto;margin-top:.8rem;border:1px solid var(--hair);border-radius:13px;}
+  .audit-table{width:100%;border-collapse:collapse;font-size:.84rem;}
+  .audit-table thead th{background:#fafafa;padding:.7rem .9rem;text-align:left;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border-bottom:1px solid var(--hair);white-space:nowrap;}
+  .audit-table tbody tr:not(:last-child){border-bottom:1px solid var(--hair);}
+  .audit-table td{padding:.65rem .9rem;vertical-align:top;}
+  .audit-row:hover td{background:#fafafa;}
+
+  /* ── Cell styles ────────────────────────────────────────────────── */
+  .audit-ts{display:block;font-weight:500;font-size:.83rem;}
+  .audit-ts-time{display:block;font-size:.73rem;color:var(--muted);}
+  .audit-connname{display:block;font-weight:600;}
+  .audit-vendor{display:block;font-size:.73rem;color:var(--muted);}
+  .audit-cap{font-family:"Geist Mono",monospace;font-size:.82rem;font-weight:500;color:var(--purple);background:#ede9fe;padding:.1rem .4rem;border-radius:5px;}
+  .audit-code{font-family:"Geist Mono",monospace;font-size:.78rem;color:var(--muted);}
+  .audit-none{color:#d4d4d4;}
+  .audit-retry{font-weight:600;color:var(--amber);}
+  .audit-dur{font-size:.82rem;color:var(--muted);}
+  .audit-eid{display:block;font-family:"Geist Mono",monospace;font-size:.77rem;color:#525252;}
+  .audit-err{font-size:.78rem;color:var(--red);cursor:help;}
+  .audit-td-method{max-width:180px;}
+  .audit-td-num{text-align:center;}
+  .audit-td-eid{max-width:160px;}
+  .audit-td-err{max-width:220px;}
+
+  /* ── Status badges ──────────────────────────────────────────────── */
+  .audit-status{font-size:.7rem;font-weight:600;padding:.18rem .55rem;border-radius:999px;white-space:nowrap;}
+  .audit-status--success{background:#d1fae5;color:#047857;}
+  .audit-status--failed{background:#fee2e2;color:#b91c1c;}
+  .audit-status--escalated{background:#fef3c7;color:#92400e;}
+  .audit-status--in_flight{background:#dbeafe;color:#1d4ed8;}
+  .audit-status--pending{background:#f5f5f5;color:#525252;}
+  .audit-status--partial{background:#fef9c3;color:#713f12;}
+  .audit-status--rolled_back{background:#f3e8ff;color:#6d28d9;}
+
+  /* ── Pagination ─────────────────────────────────────────────────── */
+  .audit-pager{display:flex;align-items:center;justify-content:center;gap:1rem;padding:1.2rem 0;}
+  .audit-pager-btn{font-size:.85rem;font-weight:600;color:var(--ink);text-decoration:none;padding:.4rem .8rem;border:1px solid var(--hair);border-radius:9px;background:#fff;}
+  .audit-pager-btn:hover{background:#f5f5f5;}
+  .audit-pager-btn--off{color:var(--muted);border-color:transparent;background:transparent;pointer-events:none;}
+  .audit-pager-info{font-size:.82rem;color:var(--muted);}
+
+  /* ── Empty state ─────────────────────────────────────────────────── */
+  .audit-empty{text-align:center;padding:4.5rem 1rem;color:var(--muted);}
+  .audit-empty svg{color:#d4d4d4;margin-bottom:1rem;}
+  .audit-empty h2{font-size:1.1rem;color:#404040;margin:0 0 .5rem;}
+  .audit-empty p{max-width:46ch;margin:0 auto 1.3rem;line-height:1.6;}
+  .audit-cta{display:inline-block;background:#0a0a0a;color:#fff;font-weight:600;font-size:.88rem;padding:.6rem 1.2rem;border-radius:11px;text-decoration:none;}
+  .audit-cta:hover{background:#262626;}
+
+  @media(max-width:640px){.audit-title{font-size:1.7rem;}.audit-table{font-size:.78rem;}}
+</style>
+{% endblock %}

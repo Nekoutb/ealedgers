@@ -12,6 +12,7 @@
         Odoo is connectable today; other vendors save and connect as their
         adapters ship.</p>
       {% if connections %}<a class="erp-matrixlink" href="{% url 'erp_capabilities' %}">View capability matrix →</a>{% endif %}
+      <a class="erp-matrixlink" href="{% url 'erp_operation_audit' %}" style="margin-left:1.2rem">View audit log →</a>
     </div>
     <a class="erp-new" href="{% url 'erp_connection_create' %}">+ New connection</a>
   </header>

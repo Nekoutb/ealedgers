@@ -2374,3 +2374,100 @@ class HealthcheckConnectionsCommandTests(TestCase):
         c2.refresh_from_db()
         self.assertIsNotNone(c1.last_healthcheck_at)
         self.assertIsNone(c2.last_healthcheck_at)       # out of scope, untouched
+
+
+# ---------------------------------------------------------------------------
+# Step 36 — ERP operation saga (track + retry/backoff + escalate)
+# ---------------------------------------------------------------------------
+
+from accounting.saga import (  # noqa: E402
+    NonRetryableError, RetryableError, SagaOutcome, compute_backoff,
+    run_erp_operation,
+)
+
+
+class SagaBackoffTests(_SimpleTestCase):
+    def test_exponential_capped(self):
+        self.assertEqual(compute_backoff(1, base=0.5), 0.5)
+        self.assertEqual(compute_backoff(2, base=0.5), 1.0)
+        self.assertEqual(compute_backoff(3, base=0.5), 2.0)
+        self.assertEqual(compute_backoff(10, base=0.5, cap=5.0), 5.0)  # capped
+
+
+class SagaRunnerTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code="XAF", name="CFA", decimal_places=0)
+        cls.t = Tenant.objects.create(slug="saga-t", name="Saga T", currency=cls.xaf)
+        cls.conn = ERPConnection.objects.create(
+            tenant=cls.t, name="Odoo", vendor="manual")
+
+    def _run(self, func, **kw):
+        self.slept = []
+        return run_erp_operation(
+            connection=self.conn, capability="CAP.03", func=func,
+            method="account.move.create", request={"x": 1},
+            sleep=self.slept.append, **kw)
+
+    def test_success_first_try(self):
+        out = self._run(lambda: {"external_id": 99, "state": "posted"})
+        self.assertTrue(out.ok)
+        self.assertFalse(out.escalated)
+        self.assertEqual(out.attempts, 1)
+        op = out.operation
+        self.assertEqual(op.status, "success")
+        self.assertEqual(op.retry_count, 0)
+        self.assertEqual(op.external_ids, {"external_id": 99})
+        self.assertEqual(op.response["state"], "posted")
+        self.assertIsNotNone(op.completed_at)
+        self.assertEqual(self.slept, [])               # no backoff on success
+
+    def test_retries_then_succeeds(self):
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RetryableError("temporary glitch")
+            return {"external_id": 7}
+
+        out = self._run(flaky, backoff_base=0.5)
+        self.assertTrue(out.ok)
+        self.assertEqual(out.attempts, 3)
+        self.assertEqual(out.operation.status, "success")
+        self.assertEqual(out.operation.retry_count, 2)
+        self.assertEqual(self.slept, [0.5, 1.0])       # backoff between retries
+
+    def test_exhausts_then_escalates(self):
+        def always_fail():
+            raise RetryableError("still down")
+
+        out = self._run(always_fail, max_attempts=3)
+        self.assertFalse(out.ok)
+        self.assertTrue(out.escalated)
+        self.assertEqual(out.attempts, 3)
+        op = out.operation
+        self.assertEqual(op.status, "escalated")
+        self.assertEqual(op.retry_count, 2)
+        self.assertIn("still down", op.error)
+        self.assertIsNotNone(op.completed_at)
+        self.assertEqual(len(self.slept), 2)           # slept between 3 attempts
+
+    def test_non_retryable_fails_fast(self):
+        def bad_request():
+            raise NonRetryableError("invalid account")
+
+        out = self._run(bad_request)
+        self.assertFalse(out.ok)
+        self.assertFalse(out.escalated)                # failed, not escalated
+        self.assertEqual(out.attempts, 1)
+        self.assertEqual(out.operation.status, "failed")
+        self.assertEqual(self.slept, [])               # never retried
+
+    def test_creates_audited_operation_row(self):
+        out = self._run(lambda: {"ok": True})
+        op = ERPOperation.objects.for_tenant(self.t).get(pk=out.operation.pk)
+        self.assertEqual(op.capability, "CAP.03")
+        self.assertEqual(op.method, "account.move.create")
+        self.assertEqual(op.request, {"x": 1})
+        self.assertEqual(op.connection, self.conn)

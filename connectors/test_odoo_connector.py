@@ -101,10 +101,12 @@ class OdooConnectorTests(SimpleTestCase):
         self.assertEqual(c.client.search_calls[0]["fields"],
                          ["code", "name", "account_type"])
 
-    def test_undeclared_capabilities_raise(self):
+    def test_undeclared_capability_raises(self):
         c = self._conn()
+        # Declares CAP.01/02/03/17; any other capability is gated off.
+        self.assertFalse(c.supports("CAP.05"))
         with self.assertRaises(CapabilityNotSupported):
-            c.fetch_trial_balance()  # CAP.17 — not until Step 33
+            c.require("CAP.05")
 
     def test_health_check_delegates_and_enriches(self):
         c = self._conn(health=HealthStatus(ok=True, state="ok", detail="up"))
@@ -318,3 +320,117 @@ class OdooConnectorJournalEntryTests(SimpleTestCase):
                 lines=[{"debit": 10, "credit": 0},          # no account at all
                        {"account_code": "401000", "debit": 0, "credit": 10}])
         self.assertEqual(c.client.created, [])
+
+
+class TBFakeClient:
+    """Model-aware fake for CAP.17. ``grouped`` provides formatted_read_group
+    output; if it's None, the method raises (to exercise the search_read
+    fallback) and ``lines`` is aggregated instead."""
+
+    def __init__(self, grouped=None, lines=None, accounts=None,
+                 raise_grouped=False):
+        self.grouped = grouped
+        self.lines = lines or []
+        self.accounts = accounts or []
+        self.raise_grouped = raise_grouped
+        self.calls = []
+
+    def formatted_read_group(self, model, domain=None, groupby=None,
+                             aggregates=None, context=None):
+        self.calls.append({"method": "formatted_read_group", "domain": domain,
+                           "groupby": groupby, "aggregates": aggregates})
+        if self.raise_grouped or self.grouped is None:
+            raise RuntimeError("formatted_read_group unavailable")
+        return self.grouped
+
+    def search_read(self, model, domain=None, fields=None, limit=None,
+                    order=None, context=None):
+        self.calls.append({"method": "search_read", "model": model,
+                           "domain": domain, "fields": fields})
+        if model == "account.account":
+            ids = domain[0][2]
+            return [a for a in self.accounts if a["id"] in ids]
+        if model == "account.move.line":
+            return self.lines
+        return []
+
+
+class OdooConnectorTrialBalanceTests(SimpleTestCase):
+    """CAP.17 — trial balance (mocked; no live Odoo)."""
+
+    ACCOUNTS = [
+        {"id": 5, "code": "601000", "name": "Achats", "account_type": "expense"},
+        {"id": 9, "code": "701000", "name": "Ventes", "account_type": "income"},
+    ]
+    GROUPED = [
+        {"account_id": [5, "601000 Achats"],
+         "debit:sum": 1000.0, "credit:sum": 0.0, "balance:sum": 1000.0},
+        {"account_id": [9, "701000 Ventes"],
+         "debit:sum": 0.0, "credit:sum": 1000.0, "balance:sum": -1000.0},
+        {"account_id": False,  # the "no account" bucket — must be skipped
+         "debit:sum": 5.0, "credit:sum": 5.0, "balance:sum": 0.0},
+    ]
+
+    def _conn(self, **kw):
+        kw.setdefault("accounts", self.ACCOUNTS)
+        return OdooConnector(config={}, client=TBFakeClient(**kw))
+
+    def test_declares_cap17(self):
+        self.assertIn("CAP.17", self._conn(grouped=self.GROUPED).capabilities)
+
+    def test_trial_balance_via_formatted_read_group(self):
+        c = self._conn(grouped=self.GROUPED)
+        tb = c.fetch_trial_balance(date_from="2026-01-01", date_to="2026-12-31")
+        self.assertEqual(tb["account_count"], 2)            # False bucket skipped
+        self.assertEqual(tb["total_debit"], 1000)
+        self.assertEqual(tb["total_credit"], 1000)
+        self.assertTrue(tb["balanced"])
+        first = tb["accounts"][0]                            # sorted by code
+        self.assertEqual(first["code"], "601000")
+        self.assertEqual(first["name"], "Achats")
+        self.assertEqual(first["account_type"], "expense")
+        self.assertEqual(first["debit"], 1000)
+        self.assertEqual(first["balance"], 1000)
+
+    def test_domain_reflects_filters(self):
+        c = self._conn(grouped=[])
+        c.fetch_trial_balance(date_from="2026-02-01", date_to="2026-02-28",
+                              journal_ids=[3, 4])
+        dom = c.client.calls[0]["domain"]
+        self.assertIn(["parent_state", "=", "posted"], dom)
+        self.assertIn(["date", ">=", "2026-02-01"], dom)
+        self.assertIn(["date", "<=", "2026-02-28"], dom)
+        self.assertIn(["journal_id", "in", [3, 4]], dom)
+
+    def test_posted_only_false_drops_state_filter(self):
+        c = self._conn(grouped=[])
+        c.fetch_trial_balance(posted_only=False)
+        dom = c.client.calls[0]["domain"]
+        self.assertNotIn(["parent_state", "=", "posted"], dom)
+
+    def test_falls_back_to_search_read_when_grouping_unavailable(self):
+        lines = [
+            {"account_id": [5, "601000 Achats"], "debit": 600, "credit": 0,
+             "balance": 600},
+            {"account_id": [5, "601000 Achats"], "debit": 400, "credit": 0,
+             "balance": 400},
+            {"account_id": [9, "701000 Ventes"], "debit": 0, "credit": 1000,
+             "balance": -1000},
+        ]
+        c = self._conn(raise_grouped=True, lines=lines)
+        tb = c.fetch_trial_balance()
+        # fallback summed the two 601000 lines: 600 + 400 = 1000
+        acc = {r["code"]: r for r in tb["accounts"]}
+        self.assertEqual(acc["601000"]["debit"], 1000)
+        self.assertEqual(tb["total_debit"], 1000)
+        self.assertEqual(tb["total_credit"], 1000)
+        self.assertTrue(tb["balanced"])
+        methods = [x["method"] for x in c.client.calls]
+        self.assertIn("search_read", methods)               # used the fallback
+
+    def test_empty_trial_balance(self):
+        c = self._conn(grouped=[])
+        tb = c.fetch_trial_balance()
+        self.assertEqual(tb["accounts"], [])
+        self.assertEqual(tb["account_count"], 0)
+        self.assertTrue(tb["balanced"])                     # 0 == 0

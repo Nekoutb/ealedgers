@@ -141,6 +141,18 @@ class OdooClient:
         kwargs = {"fields": fields} if fields else {}
         return self.execute_kw(model, "read", [ids], kwargs)
 
+    def formatted_read_group(self, model, domain=None, groupby=None,
+                             aggregates=None, context=None):
+        """Grouped aggregation (Odoo 17+ public API; replaces ``read_group``,
+        which was removed in Odoo 19). ``aggregates`` use the ``"field:agg"``
+        form, e.g. ``["debit:sum", "credit:sum"]``; returns one dict per group
+        with those keys plus the ``groupby`` fields."""
+        kwargs = {"groupby": groupby or [], "aggregates": aggregates or []}
+        if context is not None:
+            kwargs["context"] = context
+        return self.execute_kw(
+            model, "formatted_read_group", [domain or []], kwargs)
+
     def create(self, model, values):
         return self.execute_kw(model, "create", [values])
 

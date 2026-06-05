@@ -2,8 +2,9 @@
 
 Wraps the low-level ``OdooClient`` (Step 29) in the capability contract. It
 declares the capabilities it has *implemented* — CAP.01 (read CoA), CAP.02
-(lookup/create partner), CAP.03 (post journal entry), CAP.17 (trial balance)
-— and self-registers under vendor ``"odoo"`` so the factory resolves it.
+(lookup/create partner), CAP.03 (post journal entry), CAP.17 (trial balance),
+CAP.22 (detect human-posted entries, via polling) — and self-registers under
+vendor ``"odoo"`` so the factory resolves it.
 
 CAP.01 (lookup chart of accounts) is implemented here. It reads ``code``,
 ``name``, ``account_type`` and ``active`` — all present on Odoo 17/18/19.
@@ -41,7 +42,7 @@ class OdooConnector(IConnector):
     @property
     def capabilities(self):
         # Declaring == implemented keeps it honest.
-        return frozenset({"CAP.01", "CAP.02", "CAP.03", "CAP.17"})
+        return frozenset({"CAP.01", "CAP.02", "CAP.03", "CAP.17", "CAP.22"})
 
     # ----- client (lazy) --------------------------------------------------
     @property
@@ -375,3 +376,81 @@ class OdooConnector(IConnector):
             })
         rows.sort(key=lambda r: (r["code"] or ""))
         return rows
+
+    # ----- CAP.22: detect posted entries (event, via polling) -------------
+    MOVE_EVENT_FIELDS = ["name", "ref", "date", "journal_id", "move_type",
+                         "amount_total", "write_date", "write_uid"]
+
+    def poll_posted_entries(self, *, since=None, journal_ids=None,
+                            move_types=None, exclude_ref_prefix=None,
+                            exclude_ids=None, limit=200):
+        """Detect ``account.move`` records that are POSTED and changed since
+        ``since`` (Odoo ``write_date``, ``"YYYY-MM-DD HH:MM:SS"`` UTC) — so the
+        agents notice entries a human posted directly in the ERP. Read-only.
+
+        Note: EA Ledgers authenticates as the same Odoo user a human may use,
+        so ``write_uid`` can't tell agent from human — exclude EA-posted
+        entries with ``exclude_ref_prefix`` (a marker CAP.03 can stamp) or
+        ``exclude_ids`` (move ids we recorded). ``journal_ids`` / ``move_types``
+        narrow the scan.
+
+        Returns ``{since, watermark, count, truncated, entries:[...]}`` ordered
+        by ``write_date`` asc; each entry is ``{external_id, name, ref, date,
+        move_type, journal_id, journal, amount_total, write_date, write_uid,
+        write_user, raw}``. Advance your stored watermark to ``watermark`` and
+        re-poll with a small overlap, deduping by ``external_id``; if
+        ``truncated`` (the ``limit`` was hit) poll again right away.
+        """
+        self.require("CAP.22")
+        domain = [["state", "=", "posted"]]
+        if since:
+            domain.append(["write_date", ">", since])
+        if journal_ids:
+            domain.append(["journal_id", "in", list(journal_ids)])
+        if move_types:
+            domain.append(["move_type", "in", list(move_types)])
+        moves = self.client.search_read(
+            "account.move", domain=domain, fields=self.MOVE_EVENT_FIELDS,
+            order="write_date asc, id asc", limit=limit)
+
+        # Advance the watermark past EVERYTHING fetched (incl. excluded ones),
+        # so excluded entries aren't re-scanned forever. moves are write_date
+        # asc, so the last one carries the max write_date.
+        watermark = moves[-1]["write_date"] if moves else since
+
+        exclude_ids = set(exclude_ids or ())
+        entries = []
+        for m in moves:
+            if m.get("id") in exclude_ids:
+                continue
+            ref = m.get("ref") or ""
+            if exclude_ref_prefix and ref.startswith(exclude_ref_prefix):
+                continue
+            entries.append(self._normalise_move_event(m))
+
+        return {
+            "since": since,
+            "watermark": watermark,
+            "count": len(entries),
+            "truncated": len(moves) == limit,
+            "entries": entries,
+        }
+
+    @staticmethod
+    def _normalise_move_event(m):
+        jrnl = m.get("journal_id") or [None, None]
+        wuid = m.get("write_uid") or [None, None]
+        return {
+            "external_id": m.get("id"),
+            "name": m.get("name"),
+            "ref": m.get("ref") or "",
+            "date": m.get("date"),
+            "move_type": m.get("move_type"),
+            "journal_id": jrnl[0],
+            "journal": jrnl[1],
+            "amount_total": m.get("amount_total"),
+            "write_date": m.get("write_date"),
+            "write_uid": wuid[0],
+            "write_user": wuid[1],
+            "raw": m,
+        }

@@ -434,3 +434,104 @@ class OdooConnectorTrialBalanceTests(SimpleTestCase):
         self.assertEqual(tb["accounts"], [])
         self.assertEqual(tb["account_count"], 0)
         self.assertTrue(tb["balanced"])                     # 0 == 0
+
+
+class EventFakeClient:
+    """Fake for CAP.22: returns account.move rows; records the search domain."""
+
+    def __init__(self, moves=None):
+        self.moves = moves or []
+        self.calls = []
+
+    def search_read(self, model, domain=None, fields=None, limit=None,
+                    order=None, context=None):
+        self.calls.append({"model": model, "domain": domain, "fields": fields,
+                           "limit": limit, "order": order})
+        return self.moves
+
+
+class OdooConnectorPolledEventsTests(SimpleTestCase):
+    """CAP.22 — detect posted entries by polling (mocked; no live Odoo)."""
+
+    MOVES = [
+        {"id": 31, "name": "MISC/2026/06/0001", "ref": "", "date": "2026-06-04",
+         "journal_id": [3, "Miscellaneous Operations"], "move_type": "entry",
+         "amount_total": 1000.0, "write_date": "2026-06-04 15:00:00",
+         "write_uid": [2, "Nekout Boma"]},
+        {"id": 32, "name": "BILL/2026/06/0001", "ref": "EAL:auto",
+         "date": "2026-06-04", "journal_id": [11, "Purchases"],
+         "move_type": "in_invoice", "amount_total": 20000.0,
+         "write_date": "2026-06-04 15:08:37", "write_uid": [2, "Nekout Boma"]},
+    ]
+
+    def _conn(self, moves=None):
+        return OdooConnector(config={},
+                             client=EventFakeClient(moves=self.MOVES
+                                                    if moves is None else moves))
+
+    def test_declares_cap22(self):
+        self.assertIn("CAP.22", self._conn().capabilities)
+        self.assertTrue(self._conn().supports("CAP.22"))
+
+    def test_poll_normalises_and_sets_watermark(self):
+        c = self._conn()
+        out = c.poll_posted_entries(since="2026-06-04 14:00:00")
+        self.assertEqual(out["count"], 2)
+        self.assertFalse(out["truncated"])
+        self.assertEqual(out["watermark"], "2026-06-04 15:08:37")  # max wdate
+        e = out["entries"][0]
+        self.assertEqual(e["external_id"], 31)
+        self.assertEqual(e["name"], "MISC/2026/06/0001")
+        self.assertEqual(e["move_type"], "entry")
+        self.assertEqual(e["journal_id"], 3)
+        self.assertEqual(e["journal"], "Miscellaneous Operations")
+        self.assertEqual(e["write_uid"], 2)
+        self.assertEqual(e["write_user"], "Nekout Boma")
+
+    def test_domain_only_posted_and_since(self):
+        c = self._conn(moves=[])
+        c.poll_posted_entries(since="2026-06-04 14:00:00")
+        dom = c.client.calls[0]["domain"]
+        self.assertIn(["state", "=", "posted"], dom)
+        self.assertIn(["write_date", ">", "2026-06-04 14:00:00"], dom)
+        self.assertEqual(c.client.calls[0]["order"], "write_date asc, id asc")
+
+    def test_no_since_omits_write_date_filter(self):
+        c = self._conn(moves=[])
+        c.poll_posted_entries()
+        dom = c.client.calls[0]["domain"]
+        self.assertEqual(dom, [["state", "=", "posted"]])
+
+    def test_journal_and_move_type_filters(self):
+        c = self._conn(moves=[])
+        c.poll_posted_entries(journal_ids=[3], move_types=["entry"])
+        dom = c.client.calls[0]["domain"]
+        self.assertIn(["journal_id", "in", [3]], dom)
+        self.assertIn(["move_type", "in", ["entry"]], dom)
+
+    def test_exclude_ref_prefix_drops_ea_posted(self):
+        c = self._conn()
+        out = c.poll_posted_entries(exclude_ref_prefix="EAL:")
+        # the EAL:auto entry (id 32) is dropped...
+        ids = [e["external_id"] for e in out["entries"]]
+        self.assertEqual(ids, [31])
+        # ...but the watermark still advances past it (id 32's write_date)
+        self.assertEqual(out["watermark"], "2026-06-04 15:08:37")
+
+    def test_exclude_ids_drops_known_moves(self):
+        c = self._conn()
+        out = c.poll_posted_entries(exclude_ids=[31])
+        ids = [e["external_id"] for e in out["entries"]]
+        self.assertEqual(ids, [32])
+
+    def test_truncated_when_limit_hit(self):
+        c = self._conn()
+        out = c.poll_posted_entries(limit=2)   # fake returns exactly 2
+        self.assertTrue(out["truncated"])
+
+    def test_empty_keeps_since_as_watermark(self):
+        c = self._conn(moves=[])
+        out = c.poll_posted_entries(since="2026-06-01 00:00:00")
+        self.assertEqual(out["count"], 0)
+        self.assertEqual(out["watermark"], "2026-06-01 00:00:00")
+        self.assertFalse(out["truncated"])

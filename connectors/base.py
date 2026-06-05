@@ -115,6 +115,10 @@ class IConnector(ABC):
         self.require("CAP.17")
         raise NotImplementedError
 
+    def poll_posted_entries(self, **kwargs):
+        self.require("CAP.22")
+        raise NotImplementedError
+
     def execute(self, code, **params):
         """Generic capability dispatch for codes without a named method.
         Concrete connectors override this for the capabilities they add."""

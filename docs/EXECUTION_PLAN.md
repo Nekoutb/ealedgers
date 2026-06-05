@@ -170,6 +170,7 @@ unlock the next step.
 | 40  | (gate)    | **Pilot Odoo connection live (test instance, 0 drift over 7 days)** ✅                                | Odoo live, CAP.01/03/17/22 confirmed; reconcile cron wired 02:45 nightly |
 |     |           | 🟢 **Progress digest #4** — ERP layer live                                                             |                                                                          |
 | 41  | P04       | `BaseDepartment` ABC + `DepartmentSpecialist` ABC + `DepartmentManager` ✅                            | 33 new tests — all green (435 total)                                     |
+| 42  | P04       | `ApprovalQueueItem` model + per-department queue + admin views ✅                                     | 19 new tests — approve/reject/execute/factory; admin actions (454 total) |
 | 42  | P04       | `ApprovalQueueItem` model + per-department queue + admin views                                        | Items appear in dept queues                                              |
 | 43  | P04       | Persistent event bus on Postgres (Django-Q2 broker)                                                   | Emit event → handler runs                                                |
 | 44  | P04       | Cross-department `chain_id` provenance threading                                                      | Trace a chain across N depts                                             |

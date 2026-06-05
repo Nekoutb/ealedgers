@@ -2498,3 +2498,83 @@ class ApprovalQueueItem(models.Model):
     @property
     def is_approved(self):
         return self.status in ('approved', 'auto_approved')
+
+
+# ---------------------------------------------------------------------------
+# Step 43 — Event bus persistence
+# ---------------------------------------------------------------------------
+
+class BusEvent(models.Model):
+    """Durable record of every event emitted on the internal event bus.
+
+    When ``agents.events.emit()`` fires, it first creates a ``BusEvent``
+    row (status='queued'), then hands the row's PK to a Django-Q2 task
+    (``agents.events._dispatch``).  The worker picks up the task, calls
+    every registered handler, and updates the row to 'dispatched' or
+    'failed'.
+
+    This gives us:
+    * **Durability** — events survive gunicorn restarts; Q2 retries
+      (max_attempts=3) cover transient worker crashes.
+    * **Audit trail** — operations over ``/admin/accounting/busevent/``
+      let admins see which events fired, how many handlers ran, and any
+      handler errors.
+    * **chain_id provenance** — the field threads this event into the
+      cross-department causal chain (Step 44).
+
+    Append-only — do not delete rows.
+    """
+
+    STATUSES = [
+        ('queued',     'Queued — waiting for worker'),
+        ('dispatched', 'Dispatched — all handlers ran'),
+        ('failed',     'Failed — one or more handlers errored'),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='bus_events',
+    )
+    event_type = models.CharField(
+        max_length=64, db_index=True,
+        help_text="Noun.verb event name, e.g. 'bill.posted', 'invoice.sent'.",
+    )
+    payload = models.JSONField(
+        default=dict, blank=True,
+        help_text='Event-specific data dict (vendor_id, amount, …).',
+    )
+    chain_id = models.CharField(
+        max_length=64, blank=True, db_index=True,
+        help_text='Causal-chain UUID threading this event to related events.',
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(
+        max_length=16, choices=STATUSES, default='queued', db_index=True,
+    )
+    handler_count = models.IntegerField(
+        default=0,
+        help_text='Number of handlers that were called during dispatch.',
+    )
+    error = models.TextField(
+        blank=True,
+        help_text='Concatenated errors from any handler that raised.',
+    )
+
+    # Django-Q2 task UUID (set after async_task() is called)
+    task_id = models.CharField(max_length=128, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantManager()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant', 'event_type', '-created_at']),
+            models.Index(fields=['tenant', 'status', '-created_at']),
+            models.Index(fields=['chain_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.event_type} [{self.status}] @ {self.created_at}'

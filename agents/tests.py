@@ -1,10 +1,11 @@
-"""Tests for the agents app — scaffold + Step 41 department base classes."""
+"""Tests for the agents app — scaffold + Step 41 department base classes
++ Step 43 event bus."""
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
-from accounting.models import Currency, Tenant, TenantDepartmentSubscription
+from accounting.models import BusEvent, Currency, Tenant, TenantDepartmentSubscription
 
 from agents.department import (
     BaseDepartment,
@@ -13,6 +14,13 @@ from agents.department import (
     DepartmentSpecialist,
     Proposal,
     SpecialistResult,
+)
+from agents.events import (
+    Event,
+    clear_subscriptions,
+    emit,
+    subscribe,
+    subscriptions_for,
 )
 
 
@@ -368,3 +376,205 @@ class ProposalTests(TestCase):
 
     def test_all_ok_true_for_empty_results(self):
         self.assertTrue(self._p([]).all_ok)
+
+
+# ---------------------------------------------------------------------------
+# Step 43 — Event bus tests
+# ---------------------------------------------------------------------------
+
+# Force Q_CLUSTER sync=True so handlers run inline (no worker needed).
+# Must be a flat dict matching the shape in settings.py (not nested).
+_SYNC_Q = {'name': 'ealedgers', 'orm': 'default', 'sync': True, 'workers': 1}
+
+
+@override_settings(Q_CLUSTER=_SYNC_Q)
+class EventBusTests(TestCase):
+    """Tests for agents.events: subscribe/emit/dispatch lifecycle."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code='XAF_eb', name='CFA eb', decimal_places=0)
+        cls.tenant = Tenant.objects.create(slug='eb-co', name='EB Co', currency=cls.xaf)
+
+    def setUp(self):
+        """Clear all subscriptions before every test to prevent cross-test pollution."""
+        clear_subscriptions()
+        self._calls: list[dict] = []
+
+    def _make_handler(self, tag='h1'):
+        """Return a handler that appends its args to self._calls."""
+        calls = self._calls
+
+        def handler(event_type, payload, tenant, chain_id):
+            calls.append({
+                'tag': tag,
+                'event_type': event_type,
+                'payload': payload,
+                'tenant': tenant,
+                'chain_id': chain_id,
+            })
+
+        handler.__name__ = f'handler_{tag}'
+        return handler
+
+    # --- subscribe / subscriptions_for / clear_subscriptions ----------------
+
+    def test_subscribe_registers_handler(self):
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        self.assertIn(h, subscriptions_for('bill.posted'))
+
+    def test_subscribe_is_idempotent(self):
+        """Registering the same handler twice results in a single entry."""
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        subscribe('bill.posted', h)
+        self.assertEqual(subscriptions_for('bill.posted').count(h), 1)
+
+    def test_clear_subscriptions_single_type(self):
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        subscribe('invoice.sent', h)
+        clear_subscriptions('bill.posted')
+        self.assertEqual(subscriptions_for('bill.posted'), [])
+        self.assertIn(h, subscriptions_for('invoice.sent'))
+
+    def test_clear_subscriptions_all(self):
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        subscribe('invoice.sent', h)
+        clear_subscriptions()
+        self.assertEqual(subscriptions_for('bill.posted'), [])
+        self.assertEqual(subscriptions_for('invoice.sent'), [])
+
+    def test_subscriptions_for_unknown_type_returns_empty(self):
+        self.assertEqual(subscriptions_for('no.such.event'), [])
+
+    # --- emit creates BusEvent row ------------------------------------------
+
+    def test_emit_creates_bus_event_row(self):
+        event = Event(event_type='bill.posted', tenant=self.tenant, payload={'amount': 100})
+        bus_ev = emit(event)
+        self.assertIsNotNone(bus_ev.pk)
+        self.assertEqual(bus_ev.event_type, 'bill.posted')
+        self.assertEqual(bus_ev.tenant, self.tenant)
+        self.assertEqual(bus_ev.payload, {'amount': 100})
+
+    def test_emit_sets_chain_id(self):
+        event = Event(event_type='bill.posted', tenant=self.tenant, payload={})
+        bus_ev = emit(event)
+        self.assertTrue(bus_ev.chain_id)
+        self.assertEqual(bus_ev.chain_id, event.chain_id)
+
+    def test_emit_with_explicit_chain_id(self):
+        event = Event(
+            event_type='bill.posted', tenant=self.tenant, payload={},
+            chain_id='test-chain-abc',
+        )
+        bus_ev = emit(event)
+        self.assertEqual(bus_ev.chain_id, 'test-chain-abc')
+
+    # --- dispatch calls handlers --------------------------------------------
+
+    def test_handler_called_on_emit(self):
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        emit(Event(event_type='bill.posted', tenant=self.tenant, payload={'x': 1}))
+        self.assertEqual(len(self._calls), 1)
+        self.assertEqual(self._calls[0]['event_type'], 'bill.posted')
+        self.assertEqual(self._calls[0]['payload'], {'x': 1})
+        self.assertEqual(self._calls[0]['tenant'], self.tenant)
+
+    def test_multiple_handlers_all_called(self):
+        subscribe('invoice.sent', self._make_handler('h1'))
+        subscribe('invoice.sent', self._make_handler('h2'))
+        subscribe('invoice.sent', self._make_handler('h3'))
+        emit(Event(event_type='invoice.sent', tenant=self.tenant, payload={}))
+        tags = [c['tag'] for c in self._calls]
+        self.assertIn('h1', tags)
+        self.assertIn('h2', tags)
+        self.assertIn('h3', tags)
+
+    def test_handler_not_called_for_different_event_type(self):
+        h = self._make_handler()
+        subscribe('bill.posted', h)
+        emit(Event(event_type='invoice.sent', tenant=self.tenant, payload={}))
+        self.assertEqual(self._calls, [])
+
+    def test_no_handlers_dispatches_cleanly(self):
+        """emit() with zero subscriptions must not raise and status is 'dispatched'."""
+        bus_ev = emit(Event(event_type='payment.registered', tenant=self.tenant, payload={}))
+        self.assertEqual(bus_ev.status, 'dispatched')
+        self.assertEqual(bus_ev.handler_count, 0)
+
+    # --- dispatch updates BusEvent row --------------------------------------
+
+    def test_bus_event_status_dispatched_after_emit(self):
+        subscribe('bill.posted', self._make_handler())
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        self.assertEqual(bus_ev.status, 'dispatched')
+
+    def test_bus_event_handler_count_correct(self):
+        subscribe('bill.posted', self._make_handler('h1'))
+        subscribe('bill.posted', self._make_handler('h2'))
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        self.assertEqual(bus_ev.handler_count, 2)
+
+    def test_bus_event_dispatched_at_set(self):
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        self.assertIsNotNone(bus_ev.dispatched_at)
+
+    # --- fail-open behaviour ------------------------------------------------
+
+    def test_failing_handler_does_not_stop_other_handlers(self):
+        """A handler that raises must not prevent subsequent handlers from running."""
+        def bad_handler(et, payload, tenant, chain_id):
+            raise RuntimeError("boom")
+        bad_handler.__name__ = 'bad_handler'
+
+        good = self._make_handler('good')
+        subscribe('bill.posted', bad_handler)
+        subscribe('bill.posted', good)
+        emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        # The good handler still ran
+        self.assertEqual(len(self._calls), 1)
+        self.assertEqual(self._calls[0]['tag'], 'good')
+
+    def test_failing_handler_sets_status_failed(self):
+        def bad_handler(et, payload, tenant, chain_id):
+            raise RuntimeError("oops")
+        bad_handler.__name__ = 'bad_handler'
+        subscribe('bill.posted', bad_handler)
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        self.assertEqual(bus_ev.status, 'failed')
+
+    def test_failing_handler_error_recorded(self):
+        def bad_handler(et, payload, tenant, chain_id):
+            raise ValueError("bad data")
+        bad_handler.__name__ = 'bad_handler'
+        subscribe('bill.posted', bad_handler)
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        self.assertIn('ValueError', bus_ev.error)
+        self.assertIn('bad data', bus_ev.error)
+
+    # --- synchronous flag ---------------------------------------------------
+
+    def test_synchronous_flag_runs_inline(self):
+        """emit(synchronous=True) runs handlers even without Q_CLUSTER sync."""
+        h = self._make_handler()
+        subscribe('period.closed', h)
+        # Don't use override_settings here — pass synchronous=True explicitly
+        with override_settings(Q_CLUSTER={}):
+            bus_ev = emit(
+                Event(event_type='period.closed', tenant=self.tenant, payload={}),
+                synchronous=True,
+            )
+        self.assertEqual(len(self._calls), 1)
+        self.assertEqual(bus_ev.status, 'dispatched')
+
+    # --- BusEvent model str -------------------------------------------------
+
+    def test_bus_event_str(self):
+        bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
+        s = str(bus_ev)
+        self.assertIn('bill.posted', s)

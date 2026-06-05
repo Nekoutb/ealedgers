@@ -21,6 +21,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from connectors.capabilities import CAPABILITIES
+
 from .forms import ERPConnectionForm, SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
@@ -217,8 +219,7 @@ def agent_activity(request):
 @login_required
 @tenant_required
 def erp_connections(request):
-    """The tenant's ERP connections + their health (skeleton — connecting a
-    live Odoo is Phase P03)."""
+    """The tenant's ERP connections + their health."""
     connections = list(
         ERPConnection.objects.filter(tenant=request.tenant)
         .order_by("-is_primary", "name")
@@ -226,6 +227,38 @@ def erp_connections(request):
     return render(request, "accounting/erp_connections.html", {
         "page_name": "ERP Connections",
         "connections": connections,
+    })
+
+
+@login_required
+@tenant_required
+def capability_matrix(request):
+    """Per-tenant capability matrix — every CAP.NN × each ERP connection, with
+    health. Shows what the agents can actually do through each ERP today
+    (driven by the capabilities each connection reported at its last
+    health-check). Read-only."""
+    connections = list(
+        ERPConnection.objects.filter(tenant=request.tenant)
+        .order_by("-is_primary", "name")
+    )
+    conn_caps = [set(c.capabilities or []) for c in connections]
+    conn_rows = [
+        {"conn": c, "n_caps": len(caps)}
+        for c, caps in zip(connections, conn_caps)
+    ]
+    rows = [
+        {
+            "cap": cap,
+            "supported": [cap.code in caps for caps in conn_caps],
+            "any": any(cap.code in caps for caps in conn_caps),
+        }
+        for cap in CAPABILITIES.values()
+    ]
+    return render(request, "accounting/capability_matrix.html", {
+        "page_name": "ERP Connections",
+        "conn_rows": conn_rows,
+        "rows": rows,
+        "total_caps": len(CAPABILITIES),
     })
 
 

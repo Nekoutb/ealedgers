@@ -2219,6 +2219,7 @@ class ERPOperation(models.Model):
         ('success', 'Success'),
         ('partial', 'Partial success'),
         ('failed', 'Failed'),
+        ('escalated', 'Escalated'),     # retries exhausted — needs a human
         ('rolled_back', 'Rolled back'),
     ]
 

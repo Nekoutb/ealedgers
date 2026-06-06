@@ -73,16 +73,72 @@
     </div>
   </section>
 
+  <!-- ============ DEPARTMENTS ORG-CHART ============ -->
+  {% if dept_tiles %}
+  <section class="dept-section" aria-label="Departments">
+
+    <div class="dept-header">
+      <div>
+        <h2 class="dept-heading">Departments</h2>
+        <p class="dept-summary">
+          {{ n_subscribed }}&nbsp;of&nbsp;{{ dept_tiles|length }}&nbsp;subscribed
+          {% if n_live %}&nbsp;·&nbsp;<span class="dept-summary-live">{{ n_live }}&nbsp;agent{{ n_live|pluralize }}&nbsp;live</span>{% endif %}
+          {% if n_pending %}&nbsp;·&nbsp;<span class="dept-summary-pending">{{ n_pending }}&nbsp;pending</span>{% endif %}
+        </p>
+      </div>
+      <a href="/departments/" class="dept-view-all">Full view →</a>
+    </div>
+
+    {% if not agent_enabled and n_subscribed %}
+    <div class="dept-alert" role="alert">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2L14.5 14H1.5L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 7v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r=".75" fill="currentColor"/></svg>
+      Master agent switch is&nbsp;<strong>off</strong> — all {{ n_subscribed }}&nbsp;subscribed department{{ n_subscribed|pluralize }} are paused. Enable in
+      <a href="/admin/accounting/tenant/" class="dept-alert-link">Tenant settings</a>.
+    </div>
+    {% endif %}
+
+    <div class="dept-grid">
+      {% for dept in dept_tiles %}
+      <div class="dept-card {% if dept.agent_live %}dept-card--live{% elif dept.subscribed %}dept-card--paused{% else %}dept-card--inactive{% endif %}">
+        <div class="dept-card-top">
+          <span class="dept-code">{{ dept.code }}</span>
+          {% if dept.agent_live %}
+            <span class="dept-badge dept-badge--live">● Live</span>
+          {% elif dept.subscribed %}
+            <span class="dept-badge dept-badge--paused">● Paused</span>
+          {% else %}
+            <span class="dept-badge dept-badge--inactive">Inactive</span>
+          {% endif %}
+        </div>
+        <div class="dept-name">{{ dept.name }}</div>
+        <div class="dept-scope">{{ dept.scope }}</div>
+        <div class="dept-foot">
+          {% if dept.subscribed and dept.queue_count > 0 %}
+            <span class="dept-queue dept-queue--has">{{ dept.queue_count }}&nbsp;pending</span>
+          {% elif dept.subscribed %}
+            <span class="dept-queue dept-queue--clear">Queue clear</span>
+          {% else %}
+            <span class="dept-phase">{{ dept.phase }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+  </section>
+  {% endif %}
+
 </main>
 
 <footer class="border-t border-neutral-200 bg-white">
   <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
     <div>© Elite Advisors · EA Ledgers</div>
-    <div class="text-mono">v0.3 · SYSCOHADA · XAF</div>
+    <div class="text-mono">v0.4 · SYSCOHADA · XAF</div>
   </div>
 </footer>
 
 <style>
+  /* ---------- module tiles ---------- */
   .ws-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:1rem; }
   .ws-card { display:flex; flex-direction:column; gap:.85rem; background:#fff;
              border:1px solid #e5e5e5; border-radius:16px; padding:1.25rem;
@@ -100,6 +156,52 @@
                   font-size:.78rem; color:#737373; }
   .ws-arrow { color:#a3a3a3; transition:transform .16s ease, color .16s ease; }
   .ws-card:hover .ws-arrow { color:#404040; transform:translateX(2px); }
+
+  /* ---------- departments section ---------- */
+  .dept-section { margin-top:3rem; }
+  .dept-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:1rem; gap:1rem; }
+  .dept-heading { font-size:1.15rem; font-weight:650; letter-spacing:-.02em; color:#0a0a0a; }
+  .dept-summary { font-size:.8rem; color:#737373; margin-top:.25rem; line-height:1.4; }
+  .dept-summary-live { color:#15803d; font-weight:600; }
+  .dept-summary-pending { color:#dc2626; font-weight:600; }
+  .dept-view-all { font-size:.75rem; color:#a3a3a3; text-decoration:none; white-space:nowrap;
+                   transition:color .14s ease; }
+  .dept-view-all:hover { color:#0a0a0a; }
+
+  /* kill-switch alert banner */
+  .dept-alert { display:flex; align-items:center; gap:.55rem; margin-bottom:1.1rem; padding:.65rem 1rem;
+                background:#fffbeb; border:1px solid #fde68a; border-radius:10px;
+                font-size:.78rem; color:#92400e; line-height:1.45; }
+  .dept-alert-link { color:#92400e; font-weight:600; text-underline-offset:2px; }
+  .dept-alert svg { flex-shrink:0; color:#d97706; }
+
+  /* grid */
+  .dept-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:.8rem; }
+
+  /* individual dept card */
+  .dept-card { background:#fff; border:1px solid #e5e5e5; border-left:3px solid #e5e5e5;
+               border-radius:12px; padding:.9rem 1rem; display:flex; flex-direction:column; gap:.35rem; }
+  .dept-card--live   { border-left-color:#16a34a; }
+  .dept-card--paused { border-left-color:#d97706; }
+  .dept-card--inactive { opacity:.65; }
+
+  .dept-card-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:.2rem; }
+  .dept-code { font-family:'Geist Mono', 'Courier New', monospace; font-size:.68rem; font-weight:500;
+               color:#737373; background:#f5f5f5; padding:.12rem .4rem; border-radius:4px; }
+  .dept-badge { font-size:.63rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+                padding:.15rem .45rem; border-radius:999px; line-height:1.4; }
+  .dept-badge--live    { color:#15803d; background:#dcfce7; }
+  .dept-badge--paused  { color:#92400e; background:#fef3c7; }
+  .dept-badge--inactive{ color:#a3a3a3; background:#f5f5f5; }
+
+  .dept-name  { font-size:.9rem; font-weight:650; letter-spacing:-.01em; color:#0a0a0a; line-height:1.3; }
+  .dept-scope { font-size:.74rem; color:#737373; line-height:1.45; flex:1; }
+
+  .dept-foot  { margin-top:.55rem; padding-top:.5rem; border-top:1px solid #f5f5f5; }
+  .dept-queue         { font-size:.7rem; font-weight:700; }
+  .dept-queue--has    { color:#dc2626; }
+  .dept-queue--clear  { color:#86efac; font-weight:600; }
+  .dept-phase { font-size:.68rem; color:#d4d4d4; font-family:'Geist Mono', 'Courier New', monospace; }
 </style>
 </body>
 </html>

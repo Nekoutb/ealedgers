@@ -15,6 +15,7 @@ agents + the ERP, not hand-keyed screens.
 
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.db.models import Count
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -27,9 +28,11 @@ from .forms import ERPConnectionForm, SignupForm
 from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     AgentRun,
+    ApprovalQueueItem,
     ERPConnection,
     ERPOperation,
     SUBSCRIBABLE_DEPARTMENTS,
+    TenantDepartmentSubscription,
 )
 
 
@@ -172,10 +175,68 @@ def switch_tenant_view(request, slug):
 @login_required
 def workspace(request):
     """The home launcher — visible to any authenticated user; works even
-    without a tenant (a user with no memberships still sees it)."""
-    tenant_name = request.tenant.name if request.tenant else "EA Ledgers"
-    return render(request, "accounting/workspace.html",
-                  {"modules": MODULES, "tenant_name": tenant_name})
+    without a tenant (a user with no memberships still sees it).
+
+    Passes ``dept_tiles`` — a list of dicts with live state per department —
+    to the template so the org-chart section shows real-time subscription,
+    gate, and queue data without N+1 queries.
+    """
+    tenant = request.tenant
+    tenant_name = tenant.name if tenant else "EA Ledgers"
+    agent_enabled = bool(getattr(tenant, 'agent_enabled', False)) if tenant else False
+
+    dept_tiles = []
+    n_subscribed = 0
+    n_live = 0
+    n_pending = 0
+
+    if tenant:
+        # One query: every subscription row for this tenant (active or not).
+        subs_by_dept = {
+            s.department: s
+            for s in TenantDepartmentSubscription.objects.filter(tenant=tenant)
+        }
+
+        # One query: pending ApprovalQueueItem counts grouped by dept.
+        queue_counts = dict(
+            ApprovalQueueItem.objects
+            .for_tenant(tenant)
+            .filter(status='pending')
+            .values('dept_code')
+            .annotate(n=Count('id'))
+            .values_list('dept_code', 'n')
+        )
+
+        for code, label in SUBSCRIBABLE_DEPARTMENTS:
+            sub = subs_by_dept.get(code)
+            subscribed = sub is not None and bool(sub.active)
+            agent_live = agent_enabled and subscribed
+            scope, phase = _DEPT_META.get(code, ('', ''))
+            q_count = queue_counts.get(code, 0)
+            dept_tiles.append({
+                'code': code,
+                'name': label,
+                'scope': scope,
+                'phase': phase,
+                'subscribed': subscribed,
+                'agent_live': agent_live,
+                'queue_count': q_count,
+            })
+            if subscribed:
+                n_subscribed += 1
+            if agent_live:
+                n_live += 1
+            n_pending += q_count
+
+    return render(request, "accounting/workspace.html", {
+        "modules": MODULES,
+        "tenant_name": tenant_name,
+        "agent_enabled": agent_enabled,
+        "dept_tiles": dept_tiles,
+        "n_subscribed": n_subscribed,
+        "n_live": n_live,
+        "n_pending": n_pending,
+    })
 
 
 @login_required

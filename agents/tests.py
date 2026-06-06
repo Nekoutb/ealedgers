@@ -1,6 +1,6 @@
 """Tests for the agents app — scaffold + Step 41 department base classes
 + Step 43 event bus + Step 44 chain provenance threading
-+ Step 45 dispatcher agent."""
++ Step 45 dispatcher agent + Step 46 capacity engine."""
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -848,6 +848,12 @@ from agents.dispatcher import (   # noqa: E402
     _dispatcher_bus_handler,
     register_dispatcher,
 )
+from agents.capacity import (  # noqa: E402
+    CapacityDecision,
+    CapacityEngine,
+    CapacityResult,
+    PLAN_DEFAULT_CAPS,
+)
 
 
 # --- RoutingRule (pure, no DB) ----------------------------------------------
@@ -1101,3 +1107,253 @@ class DispatcherRouteTests(TestCase):
         from agents.events import subscriptions_for
         self.assertIn(_dispatcher_bus_handler, subscriptions_for('document.received'))
         self.assertIn(_dispatcher_bus_handler, subscriptions_for('work.submitted'))
+
+
+# ---------------------------------------------------------------------------
+# Step 46 — CapacityEngine tests
+# ---------------------------------------------------------------------------
+
+class CapacityEngineTests(TestCase):
+    """Tests for agents.capacity.CapacityEngine.
+
+    Decision hierarchy (recapped for readability):
+    1. No active subscription → QUEUE (cap = 0)
+    2. Active sub + auto_action_cap > 0 → use that override cap
+    3. Active sub + auto_action_cap == 0 → use PLAN_DEFAULT_CAPS[tenant.plan]
+    4. amount <= 0 → REFUSE  (invalid)
+    5. cap == 0 → QUEUE
+    6. amount <= cap → AUTO_APPROVE
+    7. amount > cap → QUEUE
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code='XAF_cap', name='CFA Franc (cap tests)', decimal_places=0)
+
+    def _make_tenant(self, slug, plan='free'):
+        return Tenant.objects.create(slug=slug, name=f'{slug} SARL', currency=self.xaf, plan=plan)
+
+    def _subscribe(self, tenant, dept_code, active=True, cap=None):
+        """Create a TenantDepartmentSubscription; return the instance."""
+        from decimal import Decimal as D
+        kwargs = dict(tenant=tenant, department=dept_code, active=active)
+        if cap is not None:
+            kwargs['auto_action_cap'] = D(str(cap))
+        return TenantDepartmentSubscription.objects.create(**kwargs)
+
+    # --- PLAN_DEFAULT_CAPS constant -----------------------------------------
+
+    def test_plan_default_caps_keys_cover_all_plans(self):
+        for plan in ('free', 'starter', 'pro', 'enterprise'):
+            self.assertIn(plan, PLAN_DEFAULT_CAPS)
+
+    def test_plan_default_caps_free_is_zero(self):
+        from decimal import Decimal
+        self.assertEqual(PLAN_DEFAULT_CAPS['free'], Decimal('0'))
+
+    def test_plan_default_caps_starter(self):
+        from decimal import Decimal
+        self.assertEqual(PLAN_DEFAULT_CAPS['starter'], Decimal('500000'))
+
+    def test_plan_default_caps_pro(self):
+        from decimal import Decimal
+        self.assertEqual(PLAN_DEFAULT_CAPS['pro'], Decimal('5000000'))
+
+    def test_plan_default_caps_enterprise(self):
+        from decimal import Decimal
+        self.assertEqual(PLAN_DEFAULT_CAPS['enterprise'], Decimal('50000000'))
+
+    # --- CapacityDecision enum ----------------------------------------------
+
+    def test_capacity_decision_values(self):
+        self.assertEqual(CapacityDecision.AUTO_APPROVE, 'auto_approve')
+        self.assertEqual(CapacityDecision.QUEUE,        'queue')
+        self.assertEqual(CapacityDecision.REFUSE,       'refuse')
+
+    # --- CapacityResult properties ------------------------------------------
+
+    def test_result_auto_approve_property(self):
+        from decimal import Decimal
+        r = CapacityResult(
+            decision=CapacityDecision.AUTO_APPROVE,
+            reason='ok',
+            cap=Decimal('500000'),
+            amount=Decimal('100000'),
+            dept_code='D01',
+        )
+        self.assertTrue(r.auto_approve)
+        self.assertFalse(r.should_queue)
+        self.assertFalse(r.refused)
+
+    def test_result_queue_property(self):
+        from decimal import Decimal
+        r = CapacityResult(
+            decision=CapacityDecision.QUEUE,
+            reason='over cap',
+            cap=Decimal('500000'),
+            amount=Decimal('600000'),
+            dept_code='D01',
+        )
+        self.assertFalse(r.auto_approve)
+        self.assertTrue(r.should_queue)
+        self.assertFalse(r.refused)
+
+    def test_result_refuse_property(self):
+        from decimal import Decimal
+        r = CapacityResult(
+            decision=CapacityDecision.REFUSE,
+            reason='negative',
+            cap=Decimal('0'),
+            amount=Decimal('-1'),
+            dept_code='D01',
+        )
+        self.assertFalse(r.auto_approve)
+        self.assertFalse(r.should_queue)
+        self.assertTrue(r.refused)
+
+    # --- no subscription → always QUEUE ------------------------------------
+
+    def test_no_subscription_queues(self):
+        t = self._make_tenant('nosub', plan='pro')
+        result = CapacityEngine(t).check('D01', 100)
+        self.assertTrue(result.should_queue)
+        self.assertEqual(result.decision, CapacityDecision.QUEUE)
+
+    def test_no_subscription_cap_is_zero(self):
+        t = self._make_tenant('nosub2', plan='enterprise')
+        result = CapacityEngine(t).check('D01', 100)
+        from decimal import Decimal
+        self.assertEqual(result.cap, Decimal('0'))
+
+    def test_inactive_subscription_behaves_like_no_subscription(self):
+        t = self._make_tenant('inactive', plan='pro')
+        self._subscribe(t, 'D01', active=False, cap=None)
+        result = CapacityEngine(t).check('D01', 100)
+        self.assertTrue(result.should_queue)
+
+    # --- invalid amount → REFUSE -------------------------------------------
+
+    def test_zero_amount_is_refused(self):
+        t = self._make_tenant('refuseamt', plan='pro')
+        self._subscribe(t, 'D01', active=True, cap=None)
+        result = CapacityEngine(t).check('D01', 0)
+        self.assertTrue(result.refused)
+        self.assertEqual(result.decision, CapacityDecision.REFUSE)
+
+    def test_negative_amount_is_refused(self):
+        t = self._make_tenant('neg', plan='pro')
+        self._subscribe(t, 'D01', active=True, cap=None)
+        result = CapacityEngine(t).check('D01', -1)
+        self.assertTrue(result.refused)
+
+    # --- free plan: default cap 0 → always QUEUE ---------------------------
+
+    def test_free_plan_always_queues(self):
+        t = self._make_tenant('free1', plan='free')
+        self._subscribe(t, 'D01')
+        result = CapacityEngine(t).check('D01', 1)
+        self.assertTrue(result.should_queue)
+
+    # --- starter plan -------------------------------------------------------
+
+    def test_starter_plan_below_cap_auto_approves(self):
+        t = self._make_tenant('starter1', plan='starter')
+        self._subscribe(t, 'D01')
+        result = CapacityEngine(t).check('D01', 400000)
+        self.assertTrue(result.auto_approve)
+
+    def test_starter_plan_at_cap_boundary_auto_approves(self):
+        t = self._make_tenant('starter2', plan='starter')
+        self._subscribe(t, 'D01')
+        result = CapacityEngine(t).check('D01', 500000)  # exactly at cap
+        self.assertTrue(result.auto_approve)
+
+    def test_starter_plan_above_cap_queues(self):
+        t = self._make_tenant('starter3', plan='starter')
+        self._subscribe(t, 'D01')
+        result = CapacityEngine(t).check('D01', 500001)
+        self.assertTrue(result.should_queue)
+
+    # --- pro plan -----------------------------------------------------------
+
+    def test_pro_plan_below_cap_auto_approves(self):
+        t = self._make_tenant('pro1', plan='pro')
+        self._subscribe(t, 'D02')
+        result = CapacityEngine(t).check('D02', 3000000)
+        self.assertTrue(result.auto_approve)
+
+    def test_pro_plan_above_cap_queues(self):
+        t = self._make_tenant('pro2', plan='pro')
+        self._subscribe(t, 'D02')
+        result = CapacityEngine(t).check('D02', 5000001)
+        self.assertTrue(result.should_queue)
+
+    # --- enterprise plan ----------------------------------------------------
+
+    def test_enterprise_plan_below_cap_auto_approves(self):
+        t = self._make_tenant('ent1', plan='enterprise')
+        self._subscribe(t, 'D03')
+        result = CapacityEngine(t).check('D03', 40000000)
+        self.assertTrue(result.auto_approve)
+
+    def test_enterprise_plan_above_cap_queues(self):
+        t = self._make_tenant('ent2', plan='enterprise')
+        self._subscribe(t, 'D03')
+        result = CapacityEngine(t).check('D03', 50000001)
+        self.assertTrue(result.should_queue)
+
+    # --- explicit auto_action_cap override ----------------------------------
+
+    def test_explicit_cap_overrides_plan_default(self):
+        """auto_action_cap > 0 on the subscription takes priority over the plan."""
+        t = self._make_tenant('override1', plan='free')   # free plan = 0 default
+        self._subscribe(t, 'D01', cap=200000)             # but explicit override = 200k
+        result = CapacityEngine(t).check('D01', 150000)
+        self.assertTrue(result.auto_approve)
+        from decimal import Decimal
+        self.assertEqual(result.cap, Decimal('200000'))
+
+    def test_explicit_cap_below_amount_queues(self):
+        t = self._make_tenant('override2', plan='enterprise')  # 50M default
+        self._subscribe(t, 'D01', cap=100000)                  # but override = 100k
+        result = CapacityEngine(t).check('D01', 200000)
+        self.assertTrue(result.should_queue)
+        from decimal import Decimal
+        self.assertEqual(result.cap, Decimal('100000'))
+
+    # --- unknown plan falls back to Decimal('0') ---------------------------
+
+    def test_unknown_plan_falls_back_to_zero(self):
+        t = self._make_tenant('unknown1', plan='free')
+        t.plan = 'nonexistent'   # bypass model choices validation
+        self._subscribe(t, 'D01')
+        result = CapacityEngine(t).check('D01', 1)
+        self.assertTrue(result.should_queue)
+
+    # --- dept_code on result ------------------------------------------------
+
+    def test_result_carries_dept_code(self):
+        t = self._make_tenant('deptcode', plan='pro')
+        self._subscribe(t, 'D05')
+        result = CapacityEngine(t).check('D05', 1000000)
+        self.assertEqual(result.dept_code, 'D05')
+
+    # --- str representation -------------------------------------------------
+
+    def test_engine_repr(self):
+        t = self._make_tenant('repr1', plan='free')
+        engine = CapacityEngine(t)
+        self.assertIn('CapacityEngine', repr(engine))
+
+    def test_result_str(self):
+        from decimal import Decimal
+        r = CapacityResult(
+            decision=CapacityDecision.AUTO_APPROVE,
+            reason='ok',
+            cap=Decimal('500000'),
+            amount=Decimal('100000'),
+            dept_code='D01',
+        )
+        s = str(r)
+        self.assertIn('D01', s)
+        self.assertIn('auto_approve', s)

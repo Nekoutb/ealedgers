@@ -13,7 +13,7 @@ was retired in the post-pivot cleanup — those flows belong to the department
 agents + the ERP, not hand-keyed screens.
 """
 
-from django.contrib.auth import login
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count
 from django.http import HttpResponseRedirect
@@ -31,6 +31,7 @@ from .models import (
     ApprovalQueueItem,
     ERPConnection,
     ERPOperation,
+    Membership,
     SUBSCRIBABLE_DEPARTMENTS,
     TenantDepartmentSubscription,
 )
@@ -236,6 +237,93 @@ def workspace(request):
         "n_subscribed": n_subscribed,
         "n_live": n_live,
         "n_pending": n_pending,
+    })
+
+
+@login_required
+@tenant_required
+def approver_assignment(request):
+    """Per-department approver assignment — Step 49.
+
+    Lists every active department subscription for the tenant and lets the
+    user assign a specific member as the default reviewer for each queue.
+    Leaving a row blank resets it to «use the tenant owner».
+
+    Only users who are active members of the tenant may be assigned.
+    This prevents cross-tenant privilege escalation.
+    """
+    User = get_user_model()
+    tenant = request.tenant
+
+    # Eligible approvers: active members of this tenant.
+    member_users = list(
+        User.objects.filter(
+            memberships__tenant=tenant,
+            memberships__active=True,
+        ).distinct().order_by('username')
+    )
+    member_ids = {u.pk for u in member_users}
+
+    saved = False
+    save_errors = []
+
+    if request.method == 'POST':
+        subs_to_update = TenantDepartmentSubscription.objects.filter(
+            tenant=tenant, active=True,
+        )
+        for sub in subs_to_update:
+            raw = request.POST.get(f'approver_{sub.department}', '').strip()
+            if not raw:
+                sub.default_approver = None
+                sub.save(update_fields=['default_approver'])
+            else:
+                try:
+                    uid = int(raw)
+                    if uid in member_ids:
+                        sub.default_approver_id = uid
+                        sub.save(update_fields=['default_approver'])
+                    else:
+                        save_errors.append(
+                            f'{sub.department}: selected user is not a member of this tenant.'
+                        )
+                except (ValueError, OverflowError):
+                    save_errors.append(f'{sub.department}: invalid user value.')
+        if not save_errors:
+            saved = True
+
+    # Fetch (or re-fetch after save) subscriptions with approver joined.
+    subscriptions = (
+        TenantDepartmentSubscription.objects
+        .filter(tenant=tenant, active=True)
+        .select_related('default_approver')
+        .order_by('department')
+    )
+
+    dept_labels = dict(SUBSCRIBABLE_DEPARTMENTS)
+    owner = getattr(tenant, 'owner', None)
+
+    rows = [
+        {
+            'sub': sub,
+            'dept_code': sub.department,
+            'dept_name': dept_labels.get(sub.department, sub.department),
+            'dept_scope': _DEPT_META.get(sub.department, ('', ''))[0],
+            'current_approver': sub.default_approver,
+        }
+        for sub in subscriptions
+    ]
+
+    n_assigned = sum(1 for r in rows if r['current_approver'] is not None)
+
+    return render(request, 'accounting/approver_assignment.html', {
+        'rows': rows,
+        'member_users': member_users,
+        'tenant_name': tenant.name,
+        'owner': owner,
+        'saved': saved,
+        'save_errors': save_errors,
+        'n_assigned': n_assigned,
+        'n_subscribed': len(rows),
     })
 
 

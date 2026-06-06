@@ -1,0 +1,242 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approver Assignment · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<!-- ============ TOP BAR ============ -->
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+        <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
+        </svg>
+        <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+      </a>
+      <span class="text-neutral-300 text-sm">/</span>
+      <span class="text-sm text-neutral-600">Approver Assignment</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+      <form method="post" action="/admin/logout/">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-ghost text-xs">Sign out</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<!-- ============ MAIN ============ -->
+<main class="flex-1 max-w-4xl mx-auto w-full px-6 py-10">
+
+  <!-- Page header -->
+  <div class="mb-8">
+    <a href="/workspace/" class="text-xs text-neutral-400 hover:text-neutral-700 transition mb-3 inline-block">← Back to workspace</a>
+    <h1 class="text-2xl font-semibold tracking-tight text-neutral-950">Approver Assignment</h1>
+    <p class="text-sm text-neutral-500 mt-1.5 max-w-xl">
+      Assign a specific team member as the default reviewer for each department's
+      approval queue. Leave a row blank to fall back to the tenant owner
+      (<strong>{{ owner.username|default:"unset" }}</strong>).
+    </p>
+  </div>
+
+  <!-- Success / error banners -->
+  {% if saved %}
+  <div class="apr-banner apr-banner--ok" role="status">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M5 8.5l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Assignments saved successfully.
+  </div>
+  {% endif %}
+  {% if save_errors %}
+  <div class="apr-banner apr-banner--err" role="alert">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M8 5v4M8 11v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <div>
+      {% for err in save_errors %}<div>{{ err }}</div>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- No subscriptions state -->
+  {% if not rows %}
+  <div class="apr-empty">
+    <div class="apr-empty-icon">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="13" stroke="#d4d4d4" stroke-width="2"/><path d="M16 10v6M16 20v.5" stroke="#d4d4d4" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <p class="text-neutral-500 text-sm">No active department subscriptions yet.</p>
+    <p class="text-neutral-400 text-xs mt-1">
+      Subscribe to departments in
+      <a href="/admin/accounting/tenantdepartmentsubscription/add/" class="underline text-neutral-500">Tenant settings</a>
+      to assign approvers.
+    </p>
+  </div>
+
+  {% else %}
+
+  <!-- Stats bar -->
+  <div class="apr-stats">
+    <span class="apr-stat">
+      <span class="apr-stat-n">{{ n_subscribed }}</span>
+      <span class="apr-stat-l">dept{{ n_subscribed|pluralize }} subscribed</span>
+    </span>
+    <span class="apr-stat-divider">·</span>
+    <span class="apr-stat">
+      <span class="apr-stat-n {% if n_assigned > 0 %}apr-stat-n--ok{% endif %}">{{ n_assigned }}</span>
+      <span class="apr-stat-l">explicitly assigned</span>
+    </span>
+    <span class="apr-stat-divider">·</span>
+    <span class="apr-stat">
+      <span class="apr-stat-n">{{ member_users|length }}</span>
+      <span class="apr-stat-l">eligible member{{ member_users|length|pluralize }}</span>
+    </span>
+  </div>
+
+  <!-- Assignment form -->
+  <form method="post" action="" novalidate>
+    {% csrf_token %}
+    <div class="apr-table">
+
+      <!-- Header row -->
+      <div class="apr-row apr-row--head">
+        <div class="apr-col apr-col--dept">Department</div>
+        <div class="apr-col apr-col--scope">Scope</div>
+        <div class="apr-col apr-col--approver">Approver</div>
+      </div>
+
+      <!-- Data rows -->
+      {% for row in rows %}
+      <div class="apr-row">
+
+        <div class="apr-col apr-col--dept">
+          <span class="apr-code">{{ row.dept_code }}</span>
+          <span class="apr-dname">{{ row.dept_name }}</span>
+        </div>
+
+        <div class="apr-col apr-col--scope">{{ row.dept_scope }}</div>
+
+        <div class="apr-col apr-col--approver">
+          <select name="approver_{{ row.dept_code }}" class="apr-select" aria-label="Approver for {{ row.dept_name }}">
+            <option value="">— Owner default ({{ owner.username|default:"unset" }}) —</option>
+            {% for u in member_users %}
+            <option value="{{ u.pk }}"
+              {% if row.current_approver and row.current_approver.pk == u.pk %}selected{% endif %}>
+              {{ u.username }}{% if u.get_full_name %} · {{ u.get_full_name }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          {% if row.current_approver %}
+          <span class="apr-assigned-badge">✓ {{ row.current_approver.username }}</span>
+          {% endif %}
+        </div>
+
+      </div>
+      {% endfor %}
+
+    </div><!-- /.apr-table -->
+
+    <div class="apr-actions">
+      <button type="submit" class="apr-save-btn">Save assignments</button>
+      <a href="/workspace/" class="apr-cancel-link">Cancel</a>
+    </div>
+
+  </form>
+  {% endif %}
+
+</main>
+
+<footer class="border-t border-neutral-200 bg-white mt-auto">
+  <div class="max-w-4xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div class="text-mono">v0.4 · SYSCOHADA · XAF</div>
+  </div>
+</footer>
+
+<style>
+  /* banners */
+  .apr-banner { display:flex; align-items:flex-start; gap:.6rem; padding:.7rem 1rem;
+                border-radius:10px; font-size:.8rem; margin-bottom:1.25rem; line-height:1.5; }
+  .apr-banner--ok  { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+  .apr-banner--err { background:#fff1f2; border:1px solid #fecdd3; color:#b91c1c; }
+  .apr-banner svg  { flex-shrink:0; margin-top:.05rem; }
+
+  /* empty state */
+  .apr-empty { text-align:center; padding:3rem 1rem; }
+  .apr-empty-icon { margin:0 auto 1rem; }
+
+  /* stats bar */
+  .apr-stats { display:flex; align-items:center; gap:.75rem; margin-bottom:1.25rem;
+               padding:.6rem .9rem; background:#fff; border:1px solid #e5e5e5; border-radius:10px; }
+  .apr-stat { display:flex; align-items:baseline; gap:.3rem; }
+  .apr-stat-n { font-size:1rem; font-weight:700; color:#0a0a0a; font-variant-numeric:tabular-nums; }
+  .apr-stat-n--ok { color:#15803d; }
+  .apr-stat-l { font-size:.75rem; color:#737373; }
+  .apr-stat-divider { color:#d4d4d4; font-size:.85rem; }
+
+  /* table layout */
+  .apr-table { border:1px solid #e5e5e5; border-radius:12px; overflow:hidden; background:#fff; }
+  .apr-row { display:grid; grid-template-columns: 200px 1fr 260px; gap:0;
+             border-bottom:1px solid #f0f0f0; align-items:center; }
+  .apr-row:last-child { border-bottom:none; }
+  .apr-row--head { background:#fafafa; }
+  .apr-col { padding:.75rem 1rem; font-size:.82rem; }
+  .apr-col--dept { display:flex; align-items:center; gap:.55rem; flex-wrap:wrap; }
+  .apr-col--scope { color:#737373; font-size:.76rem; line-height:1.45; }
+  .apr-col--approver { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .apr-row--head .apr-col { font-size:.7rem; font-weight:700; text-transform:uppercase;
+                             letter-spacing:.06em; color:#a3a3a3; padding:.6rem 1rem; }
+
+  /* dept col */
+  .apr-code { font-family:'Geist Mono','Courier New',monospace; font-size:.68rem; font-weight:500;
+              color:#737373; background:#f5f5f5; padding:.1rem .38rem; border-radius:4px; flex-shrink:0; }
+  .apr-dname { font-weight:600; color:#0a0a0a; font-size:.85rem; }
+
+  /* select */
+  .apr-select { flex:1; min-width:160px; font-size:.8rem; padding:.4rem .6rem;
+                border:1px solid #e5e5e5; border-radius:7px; background:#fff;
+                color:#0a0a0a; outline:none; cursor:pointer;
+                transition:border-color .14s ease, box-shadow .14s ease; }
+  .apr-select:focus { border-color:#0a0a0a; box-shadow:0 0 0 2px rgba(0,0,0,.06); }
+
+  /* assigned badge */
+  .apr-assigned-badge { font-size:.66rem; font-weight:600; color:#15803d; background:#dcfce7;
+                        padding:.1rem .4rem; border-radius:999px; white-space:nowrap; }
+
+  /* actions */
+  .apr-actions { margin-top:1.25rem; display:flex; align-items:center; gap:1rem; }
+  .apr-save-btn { padding:.55rem 1.4rem; background:#0a0a0a; color:#fff; border:none;
+                  border-radius:8px; font-size:.85rem; font-weight:600; cursor:pointer;
+                  transition:background .14s ease; }
+  .apr-save-btn:hover { background:#262626; }
+  .apr-cancel-link { font-size:.82rem; color:#737373; text-decoration:none;
+                     transition:color .14s ease; }
+  .apr-cancel-link:hover { color:#0a0a0a; }
+
+  /* responsive: collapse scope column on small screens */
+  @media (max-width:700px) {
+    .apr-row { grid-template-columns: 1fr 220px; }
+    .apr-col--scope { display:none; }
+  }
+  @media (max-width:480px) {
+    .apr-row { grid-template-columns: 1fr; }
+    .apr-col--scope { display:none; }
+    .apr-col--dept, .apr-col--approver { padding:.6rem .75rem; }
+  }
+</style>
+
+</body>
+</html>

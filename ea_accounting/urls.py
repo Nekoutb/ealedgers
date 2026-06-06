@@ -6,6 +6,7 @@ from django.urls import include, path
 
 from accounting.views import (
     agent_activity,
+    approver_assignment,
     capability_matrix,
     departments,
     erp_connection_create,
@@ -34,6 +35,8 @@ urlpatterns = [
     path('tenant/switch/<slug:slug>/', switch_tenant_view, name='switch_tenant'),
     # Post-login home launcher
     path('workspace/', workspace, name='workspace'),
+    # Per-tenant approver assignment (Step 49)
+    path('workspace/approvers/', approver_assignment, name='approver_assignment'),
     # Platform pages — the virtual-finance-function vision (read-only skeletons
     # today; the agents fill them from Phase P03/P05+). The accounting data
     # layer itself is reached via the Django admin ("Ledger").

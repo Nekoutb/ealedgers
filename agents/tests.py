@@ -1,5 +1,6 @@
 """Tests for the agents app — scaffold + Step 41 department base classes
-+ Step 43 event bus + Step 44 chain provenance threading."""
++ Step 43 event bus + Step 44 chain provenance threading
++ Step 45 dispatcher agent."""
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -832,3 +833,271 @@ class ChainTracerTests(TestCase):
         )
         with self.assertRaises(Exception):
             entry.source = 'mutated'  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Step 45 — Dispatcher agent tests
+# ---------------------------------------------------------------------------
+
+from agents.dispatcher import (   # noqa: E402
+    Dispatcher,
+    RoutingResult,
+    RoutingRule,
+    _DEFAULT_RULES,
+    _DISPATCHER_EVENT_TYPES,
+    _dispatcher_bus_handler,
+    register_dispatcher,
+)
+
+
+# --- RoutingRule (pure, no DB) ----------------------------------------------
+
+class RoutingRuleTests(SimpleTestCase):
+    """Pure predicate tests — no database needed."""
+
+    def test_by_event_type_matches(self):
+        rule = RoutingRule.by_event_type('bill.posted', 'D01')
+        self.assertTrue(rule.matches('bill.posted', {}))
+
+    def test_by_event_type_no_match(self):
+        rule = RoutingRule.by_event_type('bill.posted', 'D01')
+        self.assertFalse(rule.matches('invoice.sent', {}))
+
+    def test_by_payload_value_matches(self):
+        rule = RoutingRule.by_payload_value('doc_type', 'vendor_bill', 'D01')
+        self.assertTrue(rule.matches('document.received', {'doc_type': 'vendor_bill'}))
+
+    def test_by_payload_value_no_match_wrong_value(self):
+        rule = RoutingRule.by_payload_value('doc_type', 'vendor_bill', 'D01')
+        self.assertFalse(rule.matches('document.received', {'doc_type': 'customer_invoice'}))
+
+    def test_by_payload_value_no_match_missing_key(self):
+        rule = RoutingRule.by_payload_value('doc_type', 'vendor_bill', 'D01')
+        self.assertFalse(rule.matches('document.received', {}))
+
+    def test_by_predicate_matches(self):
+        rule = RoutingRule.by_predicate(
+            lambda et, p: 'payroll' in p.get('doc_type', ''),
+            'D07',
+        )
+        self.assertTrue(rule.matches('work.submitted', {'doc_type': 'payroll_run'}))
+
+    def test_predicate_exception_returns_false(self):
+        """A predicate that raises must not crash the dispatcher."""
+        rule = RoutingRule.by_predicate(lambda et, p: 1 / 0, 'D01')
+        self.assertFalse(rule.matches('any.event', {}))
+
+    def test_repr_contains_dept_code(self):
+        rule = RoutingRule.by_event_type('bill.posted', 'D01')
+        self.assertIn('D01', repr(rule))
+
+
+# --- Dispatcher.resolve() (pure, no DB) -------------------------------------
+
+class DispatcherResolveTests(SimpleTestCase):
+    """Pure routing-logic tests — uses resolve(), no DB, no bus emit."""
+
+    def _d(self, rules=None):
+        """Return a Dispatcher with a dummy tenant (not persisted)."""
+        class _FakeTenant:
+            pk = 0
+            def __str__(self): return 'fake'
+        return Dispatcher(_FakeTenant(), rules=rules)
+
+    def test_vendor_bill_routes_to_d01(self):
+        dept, et = self._d().resolve('document.received', {'doc_type': 'vendor_bill'})
+        self.assertEqual(dept, 'D01')
+        self.assertEqual(et, 'D01.work.queued')
+
+    def test_vendor_invoice_routes_to_d01(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'vendor_invoice'})
+        self.assertEqual(dept, 'D01')
+
+    def test_purchase_order_routes_to_d01(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'purchase_order'})
+        self.assertEqual(dept, 'D01')
+
+    def test_customer_invoice_routes_to_d02(self):
+        dept, et = self._d().resolve('document.received', {'doc_type': 'customer_invoice'})
+        self.assertEqual(dept, 'D02')
+        self.assertEqual(et, 'D02.work.queued')
+
+    def test_credit_note_routes_to_d02(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'credit_note'})
+        self.assertEqual(dept, 'D02')
+
+    def test_payment_routes_to_d03(self):
+        dept, et = self._d().resolve('document.received', {'doc_type': 'payment'})
+        self.assertEqual(dept, 'D03')
+        self.assertEqual(et, 'D03.work.queued')
+
+    def test_bank_statement_routes_to_d03(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'bank_statement'})
+        self.assertEqual(dept, 'D03')
+
+    def test_asset_acquisition_routes_to_d04(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'asset_acquisition'})
+        self.assertEqual(dept, 'D04')
+
+    def test_journal_entry_routes_to_d05(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'journal_entry'})
+        self.assertEqual(dept, 'D05')
+
+    def test_period_close_routes_to_d00(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'period_close'})
+        self.assertEqual(dept, 'D00')
+
+    def test_payroll_routes_to_d07(self):
+        dept, _ = self._d().resolve('document.received', {'doc_type': 'payroll'})
+        self.assertEqual(dept, 'D07')
+
+    def test_unknown_doc_type_returns_none_and_work_unrouted(self):
+        dept, et = self._d().resolve('document.received', {'doc_type': 'mystery_doc'})
+        self.assertIsNone(dept)
+        self.assertEqual(et, 'work.unrouted')
+
+    def test_empty_payload_returns_unrouted(self):
+        dept, et = self._d().resolve('document.received', {})
+        self.assertIsNone(dept)
+        self.assertEqual(et, 'work.unrouted')
+
+    def test_custom_rules_override_defaults(self):
+        """Supplying rules= replaces all defaults."""
+        rules = [RoutingRule.by_payload_value('doc_type', 'mystery_doc', 'D06')]
+        dept, et = self._d(rules=rules).resolve('document.received', {'doc_type': 'mystery_doc'})
+        self.assertEqual(dept, 'D06')
+        self.assertEqual(et, 'D06.work.queued')
+
+    def test_custom_rules_do_not_include_defaults(self):
+        """When rules= is provided, defaults are gone."""
+        rules = [RoutingRule.by_payload_value('doc_type', 'mystery_doc', 'D06')]
+        dept, _ = self._d(rules=rules).resolve('document.received', {'doc_type': 'vendor_bill'})
+        self.assertIsNone(dept)   # vendor_bill default is not in the custom list
+
+    def test_add_rule_appended_checked_after_defaults(self):
+        """add_rule(prepend=False) appends — defaults checked first."""
+        d = self._d()
+        d.add_rule(RoutingRule.by_payload_value('doc_type', 'vendor_bill', 'D99'))
+        # D01 default fires before D99 rule
+        dept, _ = d.resolve('document.received', {'doc_type': 'vendor_bill'})
+        self.assertEqual(dept, 'D01')
+
+    def test_add_rule_prepend_checked_before_defaults(self):
+        """add_rule(prepend=True) inserts at front — fires before defaults."""
+        d = self._d()
+        d.add_rule(
+            RoutingRule.by_payload_value('doc_type', 'vendor_bill', 'D99'),
+            prepend=True,
+        )
+        dept, _ = d.resolve('document.received', {'doc_type': 'vendor_bill'})
+        self.assertEqual(dept, 'D99')
+
+    def test_rules_property_returns_copy(self):
+        """Mutating the returned list must not affect the dispatcher."""
+        d = self._d()
+        original_len = len(d.rules)
+        d.rules.clear()              # modifies the copy, not the internal list
+        self.assertEqual(len(d.rules), original_len)
+
+    def test_repr_contains_dept_code(self):
+        d = self._d()
+        self.assertIn('dispatcher', d.dept_code)
+
+
+# --- Integration: route() emits on bus, register_dispatcher() ---------------
+
+@override_settings(Q_CLUSTER=_SYNC_Q)
+class DispatcherRouteTests(TestCase):
+    """Integration tests for Dispatcher.route() and register_dispatcher().
+
+    Requires DB (BusEvent rows are written). Sync Q_CLUSTER so emission
+    completes inline with no worker needed.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code='XAF_di', name='CFA di', decimal_places=0)
+        cls.tenant = Tenant.objects.create(slug='di-co', name='DI Co', currency=cls.xaf)
+
+    def setUp(self):
+        clear_subscriptions()
+
+    # --- route() creates a BusEvent -----------------------------------------
+
+    def test_route_vendor_bill_emits_d01_work_queued(self):
+        """Acceptance criterion: vendor bill → D01.work.queued event on bus."""
+        d = Dispatcher(self.tenant)
+        result = d.route('document.received', {'doc_type': 'vendor_bill'})
+        self.assertEqual(result.target_dept, 'D01')
+        self.assertEqual(result.routed_event_type, 'D01.work.queued')
+        self.assertTrue(result.was_routed)
+        # BusEvent row persisted
+        ev = BusEvent.objects.get(
+            tenant=self.tenant, event_type='D01.work.queued',
+        )
+        self.assertEqual(ev.payload.get('_target_dept'), 'D01')
+        self.assertEqual(ev.payload.get('_routed_from'), 'document.received')
+        self.assertEqual(ev.payload.get('doc_type'), 'vendor_bill')
+
+    def test_route_unrouted_emits_work_unrouted(self):
+        d = Dispatcher(self.tenant)
+        result = d.route('document.received', {'doc_type': 'mystery'})
+        self.assertFalse(result.was_routed)
+        self.assertEqual(result.routed_event_type, 'work.unrouted')
+        self.assertTrue(BusEvent.objects.filter(
+            tenant=self.tenant, event_type='work.unrouted',
+        ).exists())
+
+    def test_route_preserves_chain_id(self):
+        d = Dispatcher(self.tenant)
+        result = d.route('document.received', {'doc_type': 'vendor_bill'}, chain_id='my-chain')
+        self.assertEqual(result.chain_id, 'my-chain')
+        ev = BusEvent.objects.get(tenant=self.tenant, event_type='D01.work.queued')
+        self.assertEqual(ev.chain_id, 'my-chain')
+
+    def test_route_generates_chain_id_when_missing(self):
+        d = Dispatcher(self.tenant)
+        result = d.route('document.received', {'doc_type': 'vendor_bill'})
+        self.assertTrue(result.chain_id)
+
+    def test_routing_result_dataclass_fields(self):
+        d = Dispatcher(self.tenant)
+        result = d.route('document.received', {'doc_type': 'customer_invoice'})
+        self.assertEqual(result.original_event_type, 'document.received')
+        self.assertEqual(result.target_dept, 'D02')
+        self.assertEqual(result.routed_event_type, 'D02.work.queued')
+        self.assertTrue(result.was_routed)
+
+    # --- register_dispatcher() + full event-driven flow ---------------------
+
+    def test_register_dispatcher_subscribes_handler(self):
+        register_dispatcher()
+        from agents.events import subscriptions_for
+        handlers = subscriptions_for('document.received')
+        self.assertIn(_dispatcher_bus_handler, handlers)
+
+    def test_register_dispatcher_idempotent(self):
+        register_dispatcher()
+        register_dispatcher()
+        from agents.events import subscriptions_for
+        handlers = subscriptions_for('document.received')
+        self.assertEqual(handlers.count(_dispatcher_bus_handler), 1)
+
+    def test_full_flow_emit_document_received_creates_routed_event(self):
+        """End-to-end: emit 'document.received' with vendor_bill → D01.work.queued exists."""
+        register_dispatcher()
+        emit(Event(
+            event_type='document.received',
+            tenant=self.tenant,
+            payload={'doc_type': 'vendor_bill', 'filename': 'facture.pdf'},
+        ))
+        self.assertTrue(BusEvent.objects.filter(
+            tenant=self.tenant, event_type='D01.work.queued',
+        ).exists())
+
+    def test_full_flow_default_event_types(self):
+        """Both default event types ('document.received', 'work.submitted') are subscribed."""
+        register_dispatcher()
+        from agents.events import subscriptions_for
+        self.assertIn(_dispatcher_bus_handler, subscriptions_for('document.received'))
+        self.assertIn(_dispatcher_bus_handler, subscriptions_for('work.submitted'))

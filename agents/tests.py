@@ -1,6 +1,7 @@
 """Tests for the agents app — scaffold + Step 41 department base classes
 + Step 43 event bus + Step 44 chain provenance threading
-+ Step 45 dispatcher agent + Step 46 capacity engine."""
++ Step 45 dispatcher agent + Step 46 capacity engine
++ Step 47 kill-switch gate."""
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -854,6 +855,11 @@ from agents.capacity import (  # noqa: E402
     CapacityResult,
     PLAN_DEFAULT_CAPS,
 )
+from agents.gate import (  # noqa: E402
+    AgentGate,
+    GateDecision,
+    GateResult,
+)
 
 
 # --- RoutingRule (pure, no DB) ----------------------------------------------
@@ -1357,3 +1363,172 @@ class CapacityEngineTests(TestCase):
         s = str(r)
         self.assertIn('D01', s)
         self.assertIn('auto_approve', s)
+
+
+# ---------------------------------------------------------------------------
+# Step 47 — AgentGate (kill-switch + subscription enforcement) tests
+# ---------------------------------------------------------------------------
+
+class AgentGateTests(TestCase):
+    """Tests for agents.gate.AgentGate.
+
+    Two checks must BOTH pass for the gate to open:
+    1. tenant.agent_enabled == True   (master kill switch)
+    2. tenant.is_subscribed(dept_code)  (active subscription exists)
+
+    The gate is fail-closed: any missing field defaults to CLOSED.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(
+            code='XAF_gate', name='CFA Franc (gate tests)', decimal_places=0,
+        )
+
+    def _make_tenant(self, slug, agent_enabled=True):
+        return Tenant.objects.create(
+            slug=slug, name=f'{slug} SARL',
+            currency=self.xaf,
+            agent_enabled=agent_enabled,
+        )
+
+    def _subscribe(self, tenant, dept_code, active=True):
+        return TenantDepartmentSubscription.objects.create(
+            tenant=tenant, department=dept_code, active=active,
+        )
+
+    # --- GateDecision enum --------------------------------------------------
+
+    def test_gate_decision_values(self):
+        self.assertEqual(GateDecision.OPEN,   'open')
+        self.assertEqual(GateDecision.CLOSED, 'closed')
+
+    # --- GateResult properties ----------------------------------------------
+
+    def test_gate_result_open_property(self):
+        r = GateResult(decision=GateDecision.OPEN, reason='ok', dept_code='D01')
+        self.assertTrue(r.open)
+        self.assertFalse(r.closed)
+
+    def test_gate_result_closed_property(self):
+        r = GateResult(decision=GateDecision.CLOSED, reason='off', dept_code='D01')
+        self.assertFalse(r.open)
+        self.assertTrue(r.closed)
+
+    def test_gate_result_str(self):
+        r = GateResult(decision=GateDecision.OPEN, reason='ok', dept_code='D02')
+        s = str(r)
+        self.assertIn('D02', s)
+        self.assertIn('open', s)
+
+    # --- master kill switch (agent_enabled=False) ---------------------------
+
+    def test_master_kill_switch_off_closes_gate(self):
+        t = self._make_tenant('ks-off', agent_enabled=False)
+        self._subscribe(t, 'D01', active=True)
+        result = AgentGate(t).check('D01')
+        self.assertTrue(result.closed)
+        self.assertEqual(result.decision, GateDecision.CLOSED)
+
+    def test_master_kill_switch_off_regardless_of_subscription(self):
+        """Kill switch off → gate closed even if subscription is active."""
+        t = self._make_tenant('ks-sub', agent_enabled=False)
+        self._subscribe(t, 'D01', active=True)
+        self._subscribe(t, 'D02', active=True)
+        for dept in ('D01', 'D02'):
+            with self.subTest(dept=dept):
+                self.assertTrue(AgentGate(t).check(dept).closed)
+
+    def test_master_kill_switch_off_reason_mentions_agent_enabled(self):
+        t = self._make_tenant('ks-reason', agent_enabled=False)
+        result = AgentGate(t).check('D01')
+        self.assertIn('agent_enabled', result.reason)
+
+    # --- subscription enforcement -------------------------------------------
+
+    def test_no_subscription_closes_gate(self):
+        t = self._make_tenant('nosub-gate', agent_enabled=True)
+        result = AgentGate(t).check('D01')
+        self.assertTrue(result.closed)
+
+    def test_inactive_subscription_closes_gate(self):
+        """active=False is the per-department kill switch."""
+        t = self._make_tenant('inactive-gate', agent_enabled=True)
+        self._subscribe(t, 'D01', active=False)
+        result = AgentGate(t).check('D01')
+        self.assertTrue(result.closed)
+
+    def test_inactive_subscription_reason_mentions_dept(self):
+        t = self._make_tenant('inactive-reason', agent_enabled=True)
+        self._subscribe(t, 'D03', active=False)
+        result = AgentGate(t).check('D03')
+        self.assertIn('D03', result.reason)
+
+    def test_subscription_for_different_dept_does_not_open_gate(self):
+        """Subscribing to D02 does not open the gate for D01."""
+        t = self._make_tenant('wrong-dept', agent_enabled=True)
+        self._subscribe(t, 'D02', active=True)
+        result = AgentGate(t).check('D01')
+        self.assertTrue(result.closed)
+
+    # --- gate opens when both checks pass -----------------------------------
+
+    def test_gate_opens_with_enabled_tenant_and_active_subscription(self):
+        t = self._make_tenant('open-gate', agent_enabled=True)
+        self._subscribe(t, 'D01', active=True)
+        result = AgentGate(t).check('D01')
+        self.assertTrue(result.open)
+        self.assertEqual(result.decision, GateDecision.OPEN)
+
+    def test_gate_open_carries_dept_code(self):
+        t = self._make_tenant('open-dept', agent_enabled=True)
+        self._subscribe(t, 'D05', active=True)
+        result = AgentGate(t).check('D05')
+        self.assertEqual(result.dept_code, 'D05')
+        self.assertTrue(result.open)
+
+    def test_each_dept_checked_independently(self):
+        """Open for D01 but closed for D02 (no sub) on same tenant."""
+        t = self._make_tenant('multi-dept', agent_enabled=True)
+        self._subscribe(t, 'D01', active=True)
+        self.assertTrue(AgentGate(t).check('D01').open)
+        self.assertTrue(AgentGate(t).check('D02').closed)
+
+    # --- fail-closed: missing agent_enabled field ---------------------------
+
+    def test_missing_agent_enabled_attribute_closes_gate(self):
+        """A tenant-like object without agent_enabled defaults to closed."""
+        class FakeTenant:
+            def is_subscribed(self, dept): return True
+        result = AgentGate(FakeTenant()).check('D01')
+        self.assertTrue(result.closed)
+
+    # --- repr ---------------------------------------------------------------
+
+    def test_gate_repr(self):
+        t = self._make_tenant('repr-gate', agent_enabled=True)
+        self.assertIn('AgentGate', repr(AgentGate(t)))
+
+    # --- integration: gate + capacity together ------------------------------
+
+    def test_gate_closed_prevents_capacity_check_being_meaningful(self):
+        """Canonical usage: gate-closed → stop; capacity check is for gate-open only."""
+        from decimal import Decimal
+        t = self._make_tenant('int-test', agent_enabled=False)
+        self._subscribe(t, 'D01', active=True)
+        gate_r = AgentGate(t).check('D01')
+        self.assertTrue(gate_r.closed)
+        # Caller should short-circuit here; capacity result is irrelevant.
+
+    def test_gate_open_then_capacity_auto_approves(self):
+        """Gate open + amount within cap → full auto-approve path."""
+        from decimal import Decimal
+        t = self._make_tenant('int-open', agent_enabled=True, )
+        t.plan = 'starter'   # 500 000 XAF cap by plan default
+        t.save()
+        sub = self._subscribe(t, 'D01', active=True)
+        # No explicit cap override → plan default applies
+        gate_r = AgentGate(t).check('D01')
+        cap_r  = CapacityEngine(t).check('D01', Decimal('100000'))
+        self.assertTrue(gate_r.open)
+        self.assertTrue(cap_r.auto_approve)

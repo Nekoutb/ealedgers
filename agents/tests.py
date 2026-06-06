@@ -1,12 +1,21 @@
 """Tests for the agents app — scaffold + Step 41 department base classes
-+ Step 43 event bus."""
++ Step 43 event bus + Step 44 chain provenance threading."""
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from accounting.models import BusEvent, Currency, Tenant, TenantDepartmentSubscription
+from accounting.models import (
+    AgentRun,
+    ApprovalQueueItem,
+    BusEvent,
+    Currency,
+    Provenance,
+    Tenant,
+    TenantDepartmentSubscription,
+)
 
+from agents.chain import ChainEntry, ChainTracer, trace_chain
 from agents.department import (
     BaseDepartment,
     DepartmentDisabledError,
@@ -578,3 +587,248 @@ class EventBusTests(TestCase):
         bus_ev = emit(Event(event_type='bill.posted', tenant=self.tenant, payload={}))
         s = str(bus_ev)
         self.assertIn('bill.posted', s)
+
+
+# ---------------------------------------------------------------------------
+# Step 44 — ChainTracer tests
+# ---------------------------------------------------------------------------
+
+_CHAIN_ID = 'test-chain-44-abcdef'
+
+
+class ChainTracerTests(TestCase):
+    """Verify that chain_id threads correctly across BusEvent, ApprovalQueueItem,
+    AgentRun, and Provenance, and that ChainTracer queries / timeline work."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.xaf = Currency.objects.create(code='XAF_ct', name='CFA ct', decimal_places=0)
+        cls.tenant = Tenant.objects.create(slug='ct-co', name='CT Co', currency=cls.xaf)
+        # Second tenant for cross-tenant isolation tests
+        cls.other = Tenant.objects.create(slug='ct-other', name='CT Other', currency=cls.xaf)
+
+    # --- construction / repr ------------------------------------------------
+
+    def test_trace_chain_convenience_returns_tracer(self):
+        tracer = trace_chain(_CHAIN_ID, self.tenant)
+        self.assertIsInstance(tracer, ChainTracer)
+        self.assertEqual(tracer.chain_id, _CHAIN_ID)
+
+    def test_repr_contains_chain_id(self):
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertIn(_CHAIN_ID, repr(tracer))
+
+    # --- is_empty -----------------------------------------------------------
+
+    def test_is_empty_true_for_unknown_chain(self):
+        tracer = ChainTracer('no-such-chain-xyz', self.tenant)
+        self.assertTrue(tracer.is_empty())
+
+    def test_is_empty_false_once_bus_event_exists(self):
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertFalse(tracer.is_empty())
+
+    # --- bus_events() -------------------------------------------------------
+
+    def test_bus_events_returns_matching_row(self):
+        ev = BusEvent.objects.create(
+            tenant=self.tenant, event_type='invoice.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        pks = list(tracer.bus_events().values_list('pk', flat=True))
+        self.assertIn(ev.pk, pks)
+
+    def test_bus_events_excludes_other_chain(self):
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='bill.posted',
+            chain_id='different-chain', status='dispatched',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertEqual(tracer.bus_events().count(), 0)
+
+    def test_bus_events_tenant_isolation(self):
+        """Another tenant's BusEvent with the same chain_id must not appear."""
+        BusEvent.objects.create(
+            tenant=self.other, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertEqual(tracer.bus_events().count(), 0)
+
+    # --- proposals() --------------------------------------------------------
+
+    def test_proposals_returns_matching_row(self):
+        item = ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='Post vendor bill', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        pks = list(tracer.proposals().values_list('pk', flat=True))
+        self.assertIn(item.pk, pks)
+
+    def test_proposals_tenant_isolation(self):
+        ApprovalQueueItem.objects.create(
+            tenant=self.other, dept_code='D01',
+            action='Other tenant bill', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertEqual(tracer.proposals().count(), 0)
+
+    # --- agent_runs() -------------------------------------------------------
+
+    def test_agent_runs_returns_matching_row(self):
+        run = AgentRun.objects.create(
+            tenant=self.tenant, department='D05',
+            task='post_je', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        pks = list(tracer.agent_runs().values_list('pk', flat=True))
+        self.assertIn(run.pk, pks)
+
+    def test_agent_runs_tenant_isolation(self):
+        AgentRun.objects.create(
+            tenant=self.other, department='D05',
+            task='post_je', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertEqual(tracer.agent_runs().count(), 0)
+
+    # --- dept_codes() -------------------------------------------------------
+
+    def test_dept_codes_from_proposals(self):
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='AP task', chain_id=_CHAIN_ID,
+        )
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D05',
+            action='GL task', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        codes = tracer.dept_codes()
+        self.assertIn('D01', codes)
+        self.assertIn('D05', codes)
+
+    def test_dept_codes_from_agent_runs(self):
+        AgentRun.objects.create(
+            tenant=self.tenant, department='D02',
+            task='ar_task', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        self.assertIn('D02', tracer.dept_codes())
+
+    def test_dept_codes_empty_for_unknown_chain(self):
+        tracer = ChainTracer('no-such-chain-xyz', self.tenant)
+        self.assertEqual(tracer.dept_codes(), set())
+
+    # --- timeline() ---------------------------------------------------------
+
+    def test_timeline_empty_for_unknown_chain(self):
+        tracer = ChainTracer('no-such-chain-xyz', self.tenant)
+        self.assertEqual(tracer.timeline(), [])
+
+    def test_timeline_returns_chain_entries(self):
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='Post AP bill', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        tl = tracer.timeline()
+        self.assertGreaterEqual(len(tl), 2)
+        for entry in tl:
+            self.assertIsInstance(entry, ChainEntry)
+
+    def test_timeline_sources_present(self):
+        """All four sources should appear when rows exist for each."""
+        User = get_user_model()
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='AP task', chain_id=_CHAIN_ID,
+        )
+        AgentRun.objects.create(
+            tenant=self.tenant, department='D01',
+            task='classify_bill', chain_id=_CHAIN_ID,
+        )
+        Provenance.objects.create(
+            tenant=self.tenant, source='agent',
+            chain_id=_CHAIN_ID, summary='Posted bill',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        sources = {e.source for e in tracer.timeline()}
+        self.assertIn('event', sources)
+        self.assertIn('proposal', sources)
+        self.assertIn('agent_run', sources)
+        self.assertIn('provenance', sources)
+
+    def test_timeline_sorted_chronologically(self):
+        """timeline() must be sorted ascending by timestamp."""
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='AP task', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        tl = tracer.timeline()
+        timestamps = [e.timestamp for e in tl]
+        self.assertEqual(timestamps, sorted(timestamps))
+
+    def test_timeline_cross_dept_chain(self):
+        """A chain that spans D01 (AP) and D05 (GL) shows both dept_codes."""
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D01',
+            action='AP: post bill', chain_id=_CHAIN_ID,
+        )
+        ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code='D05',
+            action='GL: reconcile', chain_id=_CHAIN_ID,
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        dept_codes_in_tl = {e.dept_code for e in tracer.timeline() if e.dept_code}
+        self.assertIn('D01', dept_codes_in_tl)
+        self.assertIn('D05', dept_codes_in_tl)
+
+    def test_timeline_tenant_isolation(self):
+        """The other tenant's rows must never appear in our timeline."""
+        BusEvent.objects.create(
+            tenant=self.other, event_type='bill.posted',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        BusEvent.objects.create(
+            tenant=self.tenant, event_type='invoice.sent',
+            chain_id=_CHAIN_ID, status='dispatched',
+        )
+        tracer = ChainTracer(_CHAIN_ID, self.tenant)
+        tl = tracer.timeline()
+        labels = [e.label for e in tl]
+        self.assertIn('invoice.sent', labels)
+        self.assertNotIn('bill.posted', labels)
+
+    # --- ChainEntry immutability --------------------------------------------
+
+    def test_chain_entry_is_frozen(self):
+        """ChainEntry is a frozen dataclass — fields must not be writable."""
+        from datetime import timezone
+        entry = ChainEntry(
+            chain_id='x', source='event', dept_code='',
+            label='bill.posted', status='dispatched',
+            timestamp=__import__('datetime').datetime.now(timezone.utc),
+            object_id=1, object_repr='BusEvent',
+        )
+        with self.assertRaises(Exception):
+            entry.source = 'mutated'  # type: ignore[misc]

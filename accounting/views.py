@@ -15,7 +15,7 @@ agents + the ERP, not hand-keyed screens.
 
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count
+from django.db.models import Count, Max, Min
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -29,6 +29,7 @@ from .middleware import SESSION_TENANT_KEY, switch_tenant, tenant_required
 from .models import (
     AgentRun,
     ApprovalQueueItem,
+    BusEvent,
     ERPConnection,
     ERPOperation,
     Membership,
@@ -324,6 +325,75 @@ def approver_assignment(request):
         'save_errors': save_errors,
         'n_assigned': n_assigned,
         'n_subscribed': len(rows),
+    })
+
+
+@login_required
+@tenant_required
+def chain_list(request):
+    """Audit-trail viewer — Step 50 list view.
+
+    Shows the 50 most recent causal chains (identified by chain_id) that
+    have at least one BusEvent.  Each row is a summary: how many bus events
+    belong to this chain, when it started, when the last event fired.
+    """
+    chains = (
+        BusEvent.objects
+        .for_tenant(request.tenant)
+        .filter(chain_id__gt='')      # exclude events with no chain
+        .values('chain_id')
+        .annotate(
+            n_events=Count('id'),
+            started_at=Min('created_at'),
+            last_activity=Max('created_at'),
+        )
+        .order_by('-started_at')[:50]
+    )
+    return render(request, 'accounting/chain_list.html', {
+        'chains': list(chains),
+        'tenant_name': request.tenant.name,
+    })
+
+
+@login_required
+@tenant_required
+def chain_detail(request, chain_id):
+    """Audit-trail viewer — Step 50 detail view.
+
+    Shows every artefact that shares ``chain_id`` across all four sources
+    (BusEvent, ApprovalQueueItem, AgentRun, Provenance) in a chronological
+    vertical timeline.  Multi-tenant safe: ChainTracer scopes every query
+    to the active tenant.
+    """
+    from agents.chain import trace_chain
+    tracer = trace_chain(chain_id, request.tenant)
+    timeline = tracer.timeline()
+
+    # Admin deep-link bases per source type
+    _ADMIN = {
+        'event':      '/admin/accounting/busevent/',
+        'proposal':   '/admin/accounting/approvalqueueitem/',
+        'agent_run':  '/admin/accounting/agentrun/',
+        'provenance': '/admin/accounting/provenance/',
+    }
+
+    entries = [
+        {
+            'entry': e,
+            'admin_url': f'{_ADMIN.get(e.source, "")}{e.object_id}/change/'
+                         if _ADMIN.get(e.source) else '',
+        }
+        for e in timeline
+    ]
+
+    return render(request, 'accounting/chain_detail.html', {
+        'chain_id':       chain_id,
+        'chain_id_short': chain_id[:12],
+        'entries':        entries,
+        'dept_codes':     sorted(tracer.dept_codes()),
+        'n_entries':      len(entries),
+        'not_found':      len(entries) == 0,
+        'tenant_name':    request.tenant.name,
     })
 
 

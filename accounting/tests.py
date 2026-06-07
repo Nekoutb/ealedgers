@@ -3043,3 +3043,157 @@ class ApprovalQueueAdminTests(TestCase):
     def test_add_permission_denied(self):
         r = self.client.get('/admin/accounting/approvalqueueitem/add/')
         self.assertEqual(r.status_code, 403)
+
+
+# ---------------------------------------------------------------------------
+# Step 49 — Approver Assignment view tests
+# ---------------------------------------------------------------------------
+
+class ApproverAssignmentViewTests(TestCase):
+    """Tests for /workspace/approvers/ — per-tenant approver assignment UI."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(
+            code='XAF_apr', name='CFA Franc (apr tests)', decimal_places=0,
+        )
+        # Primary tenant + owner
+        cls.owner = User.objects.create_user('apr_owner', 'o@a.test', 'pw123456')
+        cls.tenant = Tenant.objects.create(
+            slug='apr-tenant', name='Apr Tenant SARL',
+            currency=cls.xaf, owner=cls.owner,
+        )
+        Membership.objects.create(user=cls.owner, tenant=cls.tenant, role='owner', active=True)
+
+        # A second member (accountant)
+        cls.accountant = User.objects.create_user('apr_acct', 'ac@a.test', 'pw123456')
+        Membership.objects.create(user=cls.accountant, tenant=cls.tenant, role='accountant', active=True)
+
+        # A user who is NOT a member of this tenant
+        cls.outsider = User.objects.create_user('apr_out', 'out@a.test', 'pw123456')
+
+    def setUp(self):
+        self.client.force_login(self.owner)
+
+    # --- GET: no subscriptions (empty state) --------------------------------
+
+    def test_get_no_subscriptions_returns_200(self):
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_get_no_subscriptions_empty_rows(self):
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(list(r.context['rows']), [])
+
+    # --- GET: with subscriptions -------------------------------------------
+
+    def _subscribe(self, dept_code, approver=None):
+        return TenantDepartmentSubscription.objects.get_or_create(
+            tenant=self.tenant, department=dept_code,
+            defaults={'active': True, 'default_approver': approver},
+        )[0]
+
+    def test_get_with_subscription_shows_row(self):
+        sub = self._subscribe('D01')
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.status_code, 200)
+        codes = [row['dept_code'] for row in r.context['rows']]
+        self.assertIn('D01', codes)
+        sub.delete()
+
+    def test_get_context_n_subscribed(self):
+        sub1 = self._subscribe('D01')
+        sub2 = self._subscribe('D02')
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.context['n_subscribed'], 2)
+        sub1.delete(); sub2.delete()
+
+    def test_get_context_member_users_contains_owner_and_accountant(self):
+        r = self.client.get('/workspace/approvers/')
+        usernames = [u.username for u in r.context['member_users']]
+        self.assertIn('apr_owner', usernames)
+        self.assertIn('apr_acct', usernames)
+
+    def test_get_outsider_not_in_member_users(self):
+        r = self.client.get('/workspace/approvers/')
+        usernames = [u.username for u in r.context['member_users']]
+        self.assertNotIn('apr_out', usernames)
+
+    def test_get_n_assigned_counts_explicit_approvers(self):
+        sub = self._subscribe('D01', approver=self.accountant)
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.context['n_assigned'], 1)
+        sub.delete()
+
+    # --- POST: assign a valid member ----------------------------------------
+
+    def test_post_assigns_valid_member(self):
+        sub = self._subscribe('D01')
+        self.client.post('/workspace/approvers/', {
+            'approver_D01': str(self.accountant.pk),
+        })
+        sub.refresh_from_db()
+        self.assertEqual(sub.default_approver_id, self.accountant.pk)
+        sub.delete()
+
+    def test_post_saved_flag_set_on_success(self):
+        sub = self._subscribe('D01')
+        r = self.client.post('/workspace/approvers/', {
+            'approver_D01': str(self.accountant.pk),
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context['saved'])
+        sub.delete()
+
+    def test_post_blank_clears_approver(self):
+        sub = self._subscribe('D01', approver=self.accountant)
+        self.client.post('/workspace/approvers/', {'approver_D01': ''})
+        sub.refresh_from_db()
+        self.assertIsNone(sub.default_approver)
+        sub.delete()
+
+    # --- POST: non-member user rejected ------------------------------------
+
+    def test_post_outsider_rejected(self):
+        sub = self._subscribe('D01')
+        r = self.client.post('/workspace/approvers/', {
+            'approver_D01': str(self.outsider.pk),
+        })
+        sub.refresh_from_db()
+        # approver must not have been changed to the outsider
+        self.assertNotEqual(sub.default_approver_id, self.outsider.pk)
+        self.assertTrue(len(r.context['save_errors']) > 0)
+        sub.delete()
+
+    def test_post_outsider_save_errors_mention_dept(self):
+        sub = self._subscribe('D01')
+        r = self.client.post('/workspace/approvers/', {
+            'approver_D01': str(self.outsider.pk),
+        })
+        combined = ' '.join(r.context['save_errors'])
+        self.assertIn('D01', combined)
+        sub.delete()
+
+    def test_post_invalid_pk_produces_save_error(self):
+        sub = self._subscribe('D01')
+        r = self.client.post('/workspace/approvers/', {
+            'approver_D01': 'notanumber',
+        })
+        self.assertTrue(len(r.context['save_errors']) > 0)
+        sub.delete()
+
+    # --- auth / access controls -------------------------------------------
+
+    def test_unauthenticated_redirects(self):
+        self.client.logout()
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.status_code, 302)
+
+    def test_no_tenant_redirects(self):
+        orphan = get_user_model().objects.create_user(
+            'apr_orphan', 'orp@a.test', 'pw123456',
+        )
+        self.client.force_login(orphan)
+        r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.status_code, 302)

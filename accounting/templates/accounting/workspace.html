@@ -86,7 +86,10 @@
           {% if n_pending %}&nbsp;·&nbsp;<span class="dept-summary-pending">{{ n_pending }}&nbsp;pending</span>{% endif %}
         </p>
       </div>
-      <a href="/departments/" class="dept-view-all">Full view →</a>
+      <div class="dept-header-links">
+        <a href="/workspace/approvers/" class="dept-view-all">Approvers ⚙</a>
+        <a href="/departments/" class="dept-view-all">Full view →</a>
+      </div>
     </div>
 
     {% if not agent_enabled and n_subscribed %}
@@ -164,6 +167,7 @@
   .dept-summary { font-size:.8rem; color:#737373; margin-top:.25rem; line-height:1.4; }
   .dept-summary-live { color:#15803d; font-weight:600; }
   .dept-summary-pending { color:#dc2626; font-weight:600; }
+  .dept-header-links { display:flex; gap:1rem; align-items:center; }
   .dept-view-all { font-size:.75rem; color:#a3a3a3; text-decoration:none; white-space:nowrap;
                    transition:color .14s ease; }
   .dept-view-all:hover { color:#0a0a0a; }

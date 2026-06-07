@@ -8,6 +8,8 @@ from accounting.views import (
     agent_activity,
     approver_assignment,
     capability_matrix,
+    chain_detail,
+    chain_list,
     departments,
     erp_connection_create,
     erp_connection_edit,
@@ -37,6 +39,9 @@ urlpatterns = [
     path('workspace/', workspace, name='workspace'),
     # Per-tenant approver assignment (Step 49)
     path('workspace/approvers/', approver_assignment, name='approver_assignment'),
+    # Audit-trail chain timeline (Step 50)
+    path('workspace/chains/', chain_list, name='chain_list'),
+    path('workspace/chains/<str:chain_id>/', chain_detail, name='chain_detail'),
     # Platform pages — the virtual-finance-function vision (read-only skeletons
     # today; the agents fill them from Phase P03/P05+). The accounting data
     # layer itself is reached via the Django admin ("Ledger").

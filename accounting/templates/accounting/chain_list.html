@@ -1,0 +1,128 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit Trail · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition">
+        <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
+        </svg>
+        <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+      </a>
+      <span class="text-neutral-300">/</span>
+      <span class="text-sm text-neutral-600">Audit Trail</span>
+    </div>
+    <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+  </div>
+</header>
+
+<main class="flex-1 max-w-4xl mx-auto w-full px-6 py-10">
+
+  <div class="mb-8">
+    <a href="/workspace/" class="text-xs text-neutral-400 hover:text-neutral-700 transition mb-3 inline-block">← Back to workspace</a>
+    <h1 class="text-2xl font-semibold tracking-tight text-neutral-950">Audit Trail</h1>
+    <p class="text-sm text-neutral-500 mt-1.5 max-w-xl">
+      Causal chains — each row is one document or action that triggered a cascade of
+      agent steps. Click a chain to see its full cross-department timeline.
+    </p>
+  </div>
+
+  {% if not chains %}
+  <div class="ch-empty">
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <circle cx="18" cy="18" r="15" stroke="#e5e5e5" stroke-width="2"/>
+      <path d="M12 18h12M18 12v12" stroke="#e5e5e5" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <p>No causal chains yet.</p>
+    <p class="ch-empty-sub">Chains appear when an event is emitted with a <code>chain_id</code>.</p>
+  </div>
+
+  {% else %}
+  <div class="ch-list-table">
+    <div class="ch-list-head">
+      <div class="ch-list-col ch-col-id">Chain ID</div>
+      <div class="ch-list-col ch-col-ev">Events</div>
+      <div class="ch-list-col ch-col-ts">Started</div>
+      <div class="ch-list-col ch-col-last">Last activity</div>
+      <div class="ch-list-col ch-col-action"></div>
+    </div>
+
+    {% for ch in chains %}
+    <a href="/workspace/chains/{{ ch.chain_id }}/" class="ch-list-row">
+      <div class="ch-list-col ch-col-id">
+        <span class="ch-id-badge">{{ ch.chain_id|slice:":12" }}&hellip;</span>
+      </div>
+      <div class="ch-list-col ch-col-ev">
+        <span class="ch-ev-count">{{ ch.n_events }}</span>
+      </div>
+      <div class="ch-list-col ch-col-ts">
+        <time datetime="{{ ch.started_at|date:'c' }}" title="{{ ch.started_at }}">
+          {{ ch.started_at|date:"d M Y H:i" }}
+        </time>
+      </div>
+      <div class="ch-list-col ch-col-last">
+        <time datetime="{{ ch.last_activity|date:'c' }}" title="{{ ch.last_activity }}">
+          {{ ch.last_activity|date:"d M Y H:i" }}
+        </time>
+      </div>
+      <div class="ch-list-col ch-col-action">View →</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</main>
+
+<footer class="border-t border-neutral-200 bg-white mt-auto">
+  <div class="max-w-4xl mx-auto px-6 py-4 text-xs text-neutral-500 flex justify-between">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div class="text-mono">v0.4 · SYSCOHADA · XAF</div>
+  </div>
+</footer>
+
+<style>
+  .ch-empty { text-align:center; padding:4rem 1rem; color:#737373; font-size:.85rem; }
+  .ch-empty svg { margin:0 auto 1rem; }
+  .ch-empty-sub { font-size:.76rem; color:#a3a3a3; margin-top:.4rem; }
+  .ch-empty code { font-family:'Geist Mono','Courier New',monospace; font-size:.85em; background:#f5f5f5; padding:.1em .3em; border-radius:3px; }
+
+  .ch-list-table { border:1px solid #e5e5e5; border-radius:12px; overflow:hidden; background:#fff; }
+  .ch-list-head  { display:grid; grid-template-columns:1fr 60px 160px 160px 64px; gap:0;
+                   background:#fafafa; border-bottom:1px solid #ebebeb; }
+  .ch-list-row   { display:grid; grid-template-columns:1fr 60px 160px 160px 64px; gap:0;
+                   border-bottom:1px solid #f5f5f5; text-decoration:none; color:inherit;
+                   transition:background .12s ease; }
+  .ch-list-row:last-child { border-bottom:none; }
+  .ch-list-row:hover { background:#fafafa; }
+  .ch-list-col   { padding:.7rem 1rem; font-size:.8rem; color:#404040; display:flex; align-items:center; }
+  .ch-list-head .ch-list-col { font-size:.68rem; font-weight:700; text-transform:uppercase;
+                                letter-spacing:.06em; color:#a3a3a3; padding:.55rem 1rem; }
+  .ch-col-ev   { justify-content:center; }
+  .ch-col-ts, .ch-col-last { color:#737373; }
+  .ch-col-action { justify-content:flex-end; font-size:.75rem; color:#a3a3a3; }
+  .ch-list-row:hover .ch-col-action { color:#0a0a0a; }
+
+  .ch-id-badge { font-family:'Geist Mono','Courier New',monospace; font-size:.75rem;
+                 background:#f5f5f5; color:#404040; padding:.15rem .5rem;
+                 border-radius:5px; letter-spacing:.01em; }
+  .ch-ev-count { font-variant-numeric:tabular-nums; font-weight:600; font-size:.85rem; color:#0a0a0a; }
+
+  @media (max-width:640px) {
+    .ch-list-head, .ch-list-row { grid-template-columns:1fr 50px 64px; }
+    .ch-col-ts, .ch-col-last { display:none; }
+  }
+</style>
+</body>
+</html>

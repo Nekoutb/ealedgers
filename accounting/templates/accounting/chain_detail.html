@@ -1,0 +1,197 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chain {{ chain_id_short }} · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2020/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-3xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition flex-shrink-0">
+        <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
+        </svg>
+        <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+      </a>
+      <span class="text-neutral-300">/</span>
+      <a href="/workspace/chains/" class="text-sm text-neutral-600 hover:text-neutral-900 transition">Audit Trail</a>
+      <span class="text-neutral-300">/</span>
+      <span class="text-sm text-neutral-400 font-mono truncate">{{ chain_id_short }}&hellip;</span>
+    </div>
+    <span class="hidden md:inline text-sm text-neutral-600 flex-shrink-0">{{ user.username }}</span>
+  </div>
+</header>
+
+<main class="flex-1 max-w-3xl mx-auto w-full px-6 py-10">
+
+  <div class="mb-8">
+    <a href="/workspace/chains/" class="text-xs text-neutral-400 hover:text-neutral-700 transition mb-3 inline-block">← All chains</a>
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight text-neutral-950 font-mono">{{ chain_id }}</h1>
+        <div class="mt-2 flex items-center gap-2 flex-wrap">
+          {% if not not_found %}
+          <span class="cd-stat"><strong>{{ n_entries }}</strong> artefact{{ n_entries|pluralize }}</span>
+          {% if dept_codes %}
+          <span class="cd-divider">·</span>
+          <span class="cd-stat">
+            Depts:&nbsp;
+            {% for d in dept_codes %}<span class="cd-dept-badge">{{ d }}</span>{% if not forloop.last %}&nbsp;{% endif %}{% endfor %}
+          </span>
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if not_found %}
+  <div class="cd-not-found">
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <circle cx="18" cy="18" r="15" stroke="#e5e5e5" stroke-width="2"/>
+      <path d="M12 12l12 12M24 12L12 24" stroke="#e5e5e5" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <p>No artefacts found for this chain.</p>
+    <p class="cd-not-found-sub">The chain may belong to a different tenant, or may not have been created yet.</p>
+  </div>
+
+  {% else %}
+  <!-- Timeline -->
+  <div class="cd-timeline">
+    {% for row in entries %}
+    {% with e=row.entry %}
+    <div class="cd-entry cd-src--{{ e.source }}">
+
+      <!-- Dot + vertical line -->
+      <div class="cd-dot-col">
+        <div class="cd-dot cd-dot--{{ e.source }}"></div>
+        {% if not forloop.last %}<div class="cd-line"></div>{% endif %}
+      </div>
+
+      <!-- Content -->
+      <div class="cd-content">
+        <div class="cd-content-top">
+          <!-- Source badge -->
+          <span class="cd-source-badge cd-source--{{ e.source }}">
+            {% if e.source == 'event' %}Bus event
+            {% elif e.source == 'proposal' %}Proposal
+            {% elif e.source == 'agent_run' %}Agent run
+            {% elif e.source == 'provenance' %}Provenance
+            {% else %}{{ e.source }}
+            {% endif %}
+          </span>
+          <!-- Dept badge -->
+          {% if e.dept_code %}
+          <span class="cd-dept-pill">{{ e.dept_code }}</span>
+          {% endif %}
+          <!-- Status badge -->
+          <span class="cd-status cd-status--{{ e.status }}">{{ e.status }}</span>
+          <!-- Admin link -->
+          {% if row.admin_url %}
+          <a href="{{ row.admin_url }}" class="cd-admin-link" target="_blank" rel="noopener" title="Open in admin">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M2 10L10 2M10 2H5M10 2v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+          {% endif %}
+        </div>
+        <div class="cd-label">{{ e.label }}</div>
+        <time class="cd-ts" datetime="{{ e.timestamp|date:'c' }}" title="{{ e.timestamp }}">
+          {{ e.timestamp|date:"d M Y · H:i:s" }}
+        </time>
+      </div>
+
+    </div>
+    {% endwith %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</main>
+
+<footer class="border-t border-neutral-200 bg-white mt-auto">
+  <div class="max-w-3xl mx-auto px-6 py-4 text-xs text-neutral-500 flex justify-between">
+    <div>© Elite Advisors · EA Ledgers</div>
+    <div class="text-mono">v0.4 · SYSCOHADA · XAF</div>
+  </div>
+</footer>
+
+<style>
+  /* not-found */
+  .cd-not-found { text-align:center; padding:4rem 1rem; color:#737373; font-size:.85rem; }
+  .cd-not-found svg { margin:0 auto 1rem; }
+  .cd-not-found-sub { font-size:.76rem; color:#a3a3a3; margin-top:.4rem; }
+
+  /* header stats */
+  .cd-stat { font-size:.8rem; color:#737373; }
+  .cd-stat strong { color:#0a0a0a; font-weight:700; }
+  .cd-divider { color:#d4d4d4; }
+  .cd-dept-badge { display:inline-block; font-family:'Geist Mono','Courier New',monospace;
+                   font-size:.68rem; font-weight:500; color:#737373; background:#f5f5f5;
+                   padding:.1rem .35rem; border-radius:4px; }
+
+  /* timeline container */
+  .cd-timeline { display:flex; flex-direction:column; }
+
+  /* single entry */
+  .cd-entry { display:grid; grid-template-columns:28px 1fr; gap:0 1rem; }
+  .cd-dot-col { display:flex; flex-direction:column; align-items:center; }
+  .cd-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; margin-top:.45rem;
+             border:2px solid; }
+  .cd-line { width:2px; flex:1; min-height:1.5rem; margin:.25rem 0; }
+
+  /* dot / line colors by source */
+  .cd-dot--event      { background:#dbeafe; border-color:#3b82f6; }
+  .cd-dot--proposal   { background:#fef3c7; border-color:#f59e0b; }
+  .cd-dot--agent_run  { background:#ede9fe; border-color:#8b5cf6; }
+  .cd-dot--provenance { background:#dcfce7; border-color:#22c55e; }
+  .cd-entry:not(:last-child) .cd-line { background:#e5e5e5; }
+
+  /* content area */
+  .cd-content { padding:.5rem 0 1.25rem; }
+  .cd-content-top { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin-bottom:.3rem; }
+
+  /* source badge */
+  .cd-source-badge { font-size:.63rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+                     padding:.13rem .45rem; border-radius:999px; }
+  .cd-source--event      { background:#dbeafe; color:#1d4ed8; }
+  .cd-source--proposal   { background:#fef3c7; color:#b45309; }
+  .cd-source--agent_run  { background:#ede9fe; color:#7c3aed; }
+  .cd-source--provenance { background:#dcfce7; color:#15803d; }
+
+  /* dept pill */
+  .cd-dept-pill { font-family:'Geist Mono','Courier New',monospace; font-size:.65rem; font-weight:500;
+                  background:#f5f5f5; color:#737373; padding:.1rem .35rem; border-radius:4px; }
+
+  /* status badge — keyed on status value */
+  .cd-status { font-size:.63rem; font-weight:600; letter-spacing:.03em; text-transform:uppercase;
+               padding:.12rem .42rem; border-radius:999px; }
+  /* green */
+  .cd-status--dispatched, .cd-status--approved, .cd-status--completed, .cd-status--success, .cd-status--posted { background:#dcfce7; color:#15803d; }
+  /* amber */
+  .cd-status--queued, .cd-status--pending, .cd-status--running, .cd-status--in_progress { background:#fef3c7; color:#b45309; }
+  /* red */
+  .cd-status--failed, .cd-status--rejected, .cd-status--error { background:#fee2e2; color:#b91c1c; }
+  /* gray fallback */
+  .cd-status--auto_approved { background:#dcfce7; color:#15803d; }
+
+  /* label + timestamp */
+  .cd-label { font-size:.87rem; color:#0a0a0a; font-weight:500; line-height:1.4;
+               word-break:break-word; }
+  .cd-ts { display:block; font-size:.72rem; color:#a3a3a3; margin-top:.25rem;
+            font-family:'Geist Mono','Courier New',monospace; }
+
+  /* admin link icon */
+  .cd-admin-link { color:#d4d4d4; transition:color .12s ease; line-height:1; }
+  .cd-admin-link:hover { color:#0a0a0a; }
+</style>
+</body>
+</html>

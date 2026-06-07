@@ -21,6 +21,7 @@ from accounting.models import (
     AgentToolCall,
     ApprovalQueueItem,
     BankStatement,
+    BusEvent,
     BankStatementLine,
     Currency,
     CustomerInvoice,
@@ -3196,4 +3197,152 @@ class ApproverAssignmentViewTests(TestCase):
         )
         self.client.force_login(orphan)
         r = self.client.get('/workspace/approvers/')
+        self.assertEqual(r.status_code, 302)
+
+
+# ---------------------------------------------------------------------------
+# Step 50 — Chain timeline UI (audit-trail viewer) tests
+# ---------------------------------------------------------------------------
+
+class ChainTimelineViewTests(TestCase):
+    """Tests for /workspace/chains/ (list) and /workspace/chains/<id>/ (detail)."""
+
+    CHAIN_A = 'test-chain-50-aaaaaa'
+    CHAIN_B = 'test-chain-50-bbbbbb'
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.xaf = Currency.objects.create(
+            code='XAF_ch', name='CFA Franc (chain tests)', decimal_places=0,
+        )
+        cls.owner = User.objects.create_user('ch_owner', 'ch@a.test', 'pw123456')
+        cls.tenant = Tenant.objects.create(
+            slug='ch-tenant', name='Chain Tenant SARL',
+            currency=cls.xaf, owner=cls.owner,
+        )
+        Membership.objects.create(user=cls.owner, tenant=cls.tenant, role='owner', active=True)
+
+        # Second tenant for isolation tests
+        cls.other_owner = User.objects.create_user('ch_other', 'cho@a.test', 'pw123456')
+        cls.other_tenant = Tenant.objects.create(
+            slug='ch-other', name='Other SARL', currency=cls.xaf, owner=cls.other_owner,
+        )
+        Membership.objects.create(
+            user=cls.other_owner, tenant=cls.other_tenant, role='owner', active=True,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.owner)
+
+    def _make_event(self, chain_id, event_type='document.received', tenant=None):
+        return BusEvent.objects.create(
+            tenant=tenant or self.tenant,
+            event_type=event_type,
+            chain_id=chain_id,
+            status='dispatched',
+        )
+
+    # --- chain list: GET ---------------------------------------------------
+
+    def test_chain_list_returns_200(self):
+        r = self.client.get('/workspace/chains/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_chain_list_empty_state(self):
+        r = self.client.get('/workspace/chains/')
+        self.assertEqual(list(r.context['chains']), [])
+
+    def test_chain_list_shows_chain_with_events(self):
+        ev = self._make_event(self.CHAIN_A)
+        r = self.client.get('/workspace/chains/')
+        chain_ids = [c['chain_id'] for c in r.context['chains']]
+        self.assertIn(self.CHAIN_A, chain_ids)
+        ev.delete()
+
+    def test_chain_list_excludes_events_without_chain_id(self):
+        ev = BusEvent.objects.create(
+            tenant=self.tenant, event_type='orphan.event', chain_id='', status='dispatched',
+        )
+        r = self.client.get('/workspace/chains/')
+        chain_ids = [c['chain_id'] for c in r.context['chains']]
+        self.assertNotIn('', chain_ids)
+        ev.delete()
+
+    def test_chain_list_n_events_annotated(self):
+        ev1 = self._make_event(self.CHAIN_A, 'document.received')
+        ev2 = self._make_event(self.CHAIN_A, 'D01.work.queued')
+        r = self.client.get('/workspace/chains/')
+        entry = next(c for c in r.context['chains'] if c['chain_id'] == self.CHAIN_A)
+        self.assertEqual(entry['n_events'], 2)
+        ev1.delete(); ev2.delete()
+
+    def test_chain_list_tenant_isolation(self):
+        """Other-tenant chain not visible in current tenant's list."""
+        ev = self._make_event(self.CHAIN_B, tenant=self.other_tenant)
+        r = self.client.get('/workspace/chains/')
+        chain_ids = [c['chain_id'] for c in r.context['chains']]
+        self.assertNotIn(self.CHAIN_B, chain_ids)
+        ev.delete()
+
+    # --- chain detail: GET -------------------------------------------------
+
+    def test_chain_detail_returns_200(self):
+        ev = self._make_event(self.CHAIN_A)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
+        self.assertEqual(r.status_code, 200)
+        ev.delete()
+
+    def test_chain_detail_not_found_flag_for_unknown_chain(self):
+        r = self.client.get('/workspace/chains/nonexistent-chain-id/')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context['not_found'])
+
+    def test_chain_detail_entries_present(self):
+        ev = self._make_event(self.CHAIN_A)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
+        self.assertFalse(r.context['not_found'])
+        self.assertGreaterEqual(r.context['n_entries'], 1)
+        ev.delete()
+
+    def test_chain_detail_chain_id_in_context(self):
+        ev = self._make_event(self.CHAIN_A)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
+        self.assertEqual(r.context['chain_id'], self.CHAIN_A)
+        ev.delete()
+
+    def test_chain_detail_tenant_isolation(self):
+        """Other-tenant chain appears not_found for current tenant."""
+        ev = self._make_event(self.CHAIN_B, tenant=self.other_tenant)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_B}/')
+        self.assertTrue(r.context['not_found'])
+        ev.delete()
+
+    def test_chain_detail_admin_url_in_entries(self):
+        ev = self._make_event(self.CHAIN_A)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
+        entries = r.context['entries']
+        self.assertTrue(any('busevent' in row['admin_url'] for row in entries))
+        ev.delete()
+
+    # --- auth / access controls -------------------------------------------
+
+    def test_chain_list_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get('/workspace/chains/').status_code, 302)
+
+    def test_chain_detail_requires_login(self):
+        self.client.logout()
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
+        self.assertEqual(r.status_code, 302)
+
+    def test_chain_list_requires_tenant(self):
+        orphan = get_user_model().objects.create_user('ch_orphan', 'o@ch.test', 'pw123456')
+        self.client.force_login(orphan)
+        self.assertEqual(self.client.get('/workspace/chains/').status_code, 302)
+
+    def test_chain_detail_requires_tenant(self):
+        orphan = get_user_model().objects.create_user('ch_orphan2', 'o2@ch.test', 'pw123456')
+        self.client.force_login(orphan)
+        r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
         self.assertEqual(r.status_code, 302)

@@ -103,7 +103,11 @@
 
     <div class="dept-grid">
       {% for dept in dept_tiles %}
+      {% if dept.url and dept.subscribed %}
+      <a href="{{ dept.url }}" class="dept-card dept-card--link {% if dept.agent_live %}dept-card--live{% elif dept.subscribed %}dept-card--paused{% else %}dept-card--inactive{% endif %}">
+      {% else %}
       <div class="dept-card {% if dept.agent_live %}dept-card--live{% elif dept.subscribed %}dept-card--paused{% else %}dept-card--inactive{% endif %}">
+      {% endif %}
         <div class="dept-card-top">
           <span class="dept-code">{{ dept.code }}</span>
           {% if dept.agent_live %}
@@ -124,8 +128,13 @@
           {% else %}
             <span class="dept-phase">{{ dept.phase }}</span>
           {% endif %}
+          {% if dept.url and dept.subscribed %}<span class="dept-open-arrow">→</span>{% endif %}
         </div>
+      {% if dept.url and dept.subscribed %}
+      </a>
+      {% else %}
       </div>
+      {% endif %}
       {% endfor %}
     </div>
 
@@ -207,6 +216,15 @@
   .dept-queue--has    { color:#dc2626; }
   .dept-queue--clear  { color:#86efac; font-weight:600; }
   .dept-phase { font-size:.68rem; color:#d4d4d4; font-family:'Geist Mono', 'Courier New', monospace; }
+
+  /* dept card as link (D01 inbox, etc.) */
+  a.dept-card { text-decoration:none; color:inherit; cursor:pointer;
+                transition:transform .14s ease, box-shadow .14s ease, border-color .14s ease; }
+  a.dept-card:hover { transform:translateY(-1px); border-color:#d4d4d4;
+                      box-shadow:0 6px 18px -8px rgba(0,0,0,.18); }
+  .dept-open-arrow { font-size:.72rem; color:#a3a3a3; margin-left:auto;
+                     transition:color .12s ease, transform .12s ease; }
+  a.dept-card:hover .dept-open-arrow { color:#0a0a0a; transform:translateX(2px); }
 </style>
 </body>
 </html>

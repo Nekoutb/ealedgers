@@ -3346,3 +3346,300 @@ class ChainTimelineViewTests(TestCase):
         self.client.force_login(orphan)
         r = self.client.get(f'/workspace/chains/{self.CHAIN_A}/')
         self.assertEqual(r.status_code, 302)
+
+
+# ===========================================================================
+# Step 52 — AP document ingestion (model + inbox view + email webhook)
+# ===========================================================================
+
+class APDocumentModelTests(TestCase):
+    """APDocument model — creation, properties, helpers."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = Currency.objects.create(
+            code='XAF_52m', name='CFA (52m)', symbol='XAF', decimal_places=0
+        )
+        cls.tenant = _make_tenant('ap52-model', currency=cls.currency)
+        cls.user = get_user_model().objects.create_user('ap52muser', password='pw')
+
+    def _make_doc(self, **kwargs):
+        from agents.models import APDocument
+        from django.core.files.base import ContentFile
+        defaults = dict(
+            tenant=self.tenant,
+            uploaded_by=self.user,
+            file=ContentFile(b'%PDF-1.4', name='test.pdf'),
+            original_filename='invoice_001.pdf',
+            content_type='application/pdf',
+            file_size=8,
+            source=APDocument.SOURCE_UPLOAD,
+            status=APDocument.STATUS_RECEIVED,
+        )
+        defaults.update(kwargs)
+        return APDocument.objects.create(**defaults)
+
+    def test_create_apdocument(self):
+        from agents.models import APDocument
+        doc = self._make_doc()
+        self.assertIsNotNone(doc.pk)
+
+    def test_str_contains_filename(self):
+        doc = self._make_doc()
+        self.assertIn('invoice_001.pdf', str(doc))
+
+    def test_str_contains_tenant_name(self):
+        doc = self._make_doc()
+        self.assertIn(self.tenant.name, str(doc))
+
+    def test_file_size_kb_property(self):
+        doc = self._make_doc(file_size=51_200)  # exactly 50 KB
+        self.assertIn('50', doc.file_size_kb)
+
+    def test_file_size_kb_small(self):
+        doc = self._make_doc(file_size=512)
+        self.assertIn('0', doc.file_size_kb)  # < 1 KB rounds to 0
+
+    def test_chain_id_short_empty_when_no_chain(self):
+        doc = self._make_doc(chain_id='')
+        self.assertEqual(doc.chain_id_short, '')
+
+    def test_chain_id_short_truncates(self):
+        doc = self._make_doc(chain_id='abc123def456xyz')
+        self.assertEqual(doc.chain_id_short, 'abc123def456')
+
+    def test_status_defaults_to_received(self):
+        from agents.models import APDocument
+        doc = self._make_doc()
+        self.assertEqual(doc.status, APDocument.STATUS_RECEIVED)
+
+    def test_source_defaults_to_upload(self):
+        from agents.models import APDocument
+        doc = self._make_doc()
+        self.assertEqual(doc.source, APDocument.SOURCE_UPLOAD)
+
+    def test_meta_ordering_newest_first(self):
+        """Meta.ordering declares newest-first (confirmed in model definition)."""
+        from agents.models import APDocument
+        self.assertEqual(APDocument._meta.ordering, ['-received_at'])
+
+
+class APInboxViewTests(TestCase):
+    """ap_inbox view — GET list, POST upload, auth guards."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = Currency.objects.create(
+            code='XAF_52v', name='CFA (52v)', symbol='XAF', decimal_places=0
+        )
+        cls.tenant = _make_tenant('ap52-view', currency=cls.currency)
+        cls.user = get_user_model().objects.create_user('ap52vuser', password='pw')
+        Membership.objects.create(user=cls.user, tenant=cls.tenant, active=True)
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        # Set active tenant in session
+        session = self.client.session
+        session['active_tenant'] = self.tenant.slug
+        session.save()
+
+    def _pdf(self, name='bill.pdf', size=512):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile(name, b'%PDF-1.4 test' + b'x' * size, content_type='application/pdf')
+
+    # --- GET ------------------------------------------------------------------
+
+    def test_get_200(self):
+        r = self.client.get('/ap/inbox/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_get_renders_inbox_template(self):
+        r = self.client.get('/ap/inbox/')
+        self.assertTemplateUsed(r, 'accounting/ap_inbox.html')
+
+    def test_get_documents_in_context(self):
+        r = self.client.get('/ap/inbox/')
+        self.assertIn('documents', r.context)
+
+    def test_get_empty_list_initially(self):
+        r = self.client.get('/ap/inbox/')
+        self.assertEqual(len(r.context['documents']), 0)
+
+    # --- POST upload ----------------------------------------------------------
+
+    def test_post_valid_upload_200(self):
+        r = self.client.post('/ap/inbox/', {'bill_file': self._pdf()})
+        self.assertEqual(r.status_code, 200)
+
+    def test_post_valid_upload_creates_apdocument(self):
+        from agents.models import APDocument
+        before = APDocument.objects.filter(tenant=self.tenant).count()
+        self.client.post('/ap/inbox/', {'bill_file': self._pdf('inv.pdf')})
+        self.assertEqual(APDocument.objects.filter(tenant=self.tenant).count(), before + 1)
+
+    def test_post_valid_upload_dispatches_bus_event(self):
+        self.client.post('/ap/inbox/', {'bill_file': self._pdf('inv2.pdf')})
+        ev = BusEvent.objects.filter(tenant=self.tenant, event_type='bill.received').last()
+        self.assertIsNotNone(ev)
+
+    def test_post_valid_upload_links_chain_id(self):
+        from agents.models import APDocument
+        self.client.post('/ap/inbox/', {'bill_file': self._pdf('inv3.pdf')})
+        doc = APDocument.objects.filter(tenant=self.tenant).latest('received_at')
+        self.assertTrue(doc.chain_id)
+        self.assertIsNotNone(doc.bus_event)
+
+    def test_post_valid_upload_saved_doc_in_context(self):
+        r = self.client.post('/ap/inbox/', {'bill_file': self._pdf('inv4.pdf')})
+        self.assertIsNotNone(r.context['saved_doc'])
+
+    def test_post_no_file_returns_error(self):
+        r = self.client.post('/ap/inbox/', {})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context['save_errors'])
+
+    def test_post_wrong_content_type_returns_error(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        bad = SimpleUploadedFile('doc.xlsx', b'PK\x03\x04', content_type='application/vnd.ms-excel')
+        r = self.client.post('/ap/inbox/', {'bill_file': bad})
+        self.assertTrue(r.context['save_errors'])
+
+    def test_post_oversized_file_returns_error(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test.utils import override_settings
+        # Set a 1-byte cap so we can trigger the limit easily
+        big = SimpleUploadedFile('big.pdf', b'%PDF' + b'x' * 10, content_type='application/pdf')
+        with override_settings(AP_DOCUMENT_MAX_SIZE_MB=0):
+            r = self.client.post('/ap/inbox/', {'bill_file': big})
+        self.assertTrue(r.context['save_errors'])
+
+    def test_post_notes_stored(self):
+        from agents.models import APDocument
+        self.client.post('/ap/inbox/', {
+            'bill_file': self._pdf('noted.pdf'),
+            'notes': 'Orange Cameroon invoice',
+        })
+        doc = APDocument.objects.filter(tenant=self.tenant, notes__icontains='Orange').first()
+        self.assertIsNotNone(doc)
+
+    # --- auth guards ----------------------------------------------------------
+
+    def test_get_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get('/ap/inbox/').status_code, 302)
+
+    def test_get_requires_tenant(self):
+        orphan = get_user_model().objects.create_user('ap52orphan', password='pw52')
+        self.client.force_login(orphan)
+        self.assertEqual(self.client.get('/ap/inbox/').status_code, 302)
+
+
+class APEmailWebhookTests(TestCase):
+    """ap_email_webhook view — token auth, doc creation, tenant routing."""
+
+    TOKEN = 'test-webhook-token-52'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = Currency.objects.create(
+            code='XAF_52w', name='CFA (52w)', symbol='XAF', decimal_places=0
+        )
+        cls.tenant = _make_tenant('ap52-webhook', currency=cls.currency)
+
+    def _url(self, token=None):
+        t = token if token is not None else self.TOKEN
+        return f'/ap/webhook/email/?token={t}'
+
+    def _post(self, token=None, **extra):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {
+            'Subject': 'Invoice from Orange',
+            'sender': 'billing@orange.cm',
+            'recipient': f'{self.tenant.slug}@bills.ealedgers.com',
+            'attachment-1': SimpleUploadedFile('bill.pdf', b'%PDF-1.4', content_type='application/pdf'),
+        }
+        data.update(extra)
+        return self.client.post(self._url(token), data)
+
+    # --- auth -----------------------------------------------------------------
+
+    def test_wrong_token_returns_403(self):
+        from django.test.utils import override_settings
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            r = self._post(token='bad-token')
+        self.assertEqual(r.status_code, 403)
+
+    def test_correct_token_returns_200(self):
+        from django.test.utils import override_settings
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            r = self._post()
+        self.assertEqual(r.status_code, 200)
+
+    def test_get_not_allowed(self):
+        r = self.client.get(self._url())
+        self.assertEqual(r.status_code, 405)
+
+    # --- doc creation ---------------------------------------------------------
+
+    def test_creates_apdocument_for_known_tenant(self):
+        from agents.models import APDocument
+        from django.test.utils import override_settings
+        before = APDocument.objects.filter(tenant=self.tenant).count()
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            self._post()
+        self.assertEqual(APDocument.objects.filter(tenant=self.tenant).count(), before + 1)
+
+    def test_document_source_is_email(self):
+        from agents.models import APDocument
+        from django.test.utils import override_settings
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            self._post()
+        doc = APDocument.objects.filter(tenant=self.tenant).latest('received_at')
+        self.assertEqual(doc.source, APDocument.SOURCE_EMAIL)
+
+    def test_docs_created_count_in_response(self):
+        from django.test.utils import override_settings
+        import json
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            r = self._post()
+        data = json.loads(r.content)
+        self.assertEqual(data['docs_created'], 1)
+
+    def test_unknown_tenant_returns_200_zero_docs(self):
+        from django.test.utils import override_settings
+        import json
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {
+            'Subject': 'test',
+            'sender': 'x@x.com',
+            'recipient': 'no-such-tenant@bills.ealedgers.com',
+            'attachment-1': SimpleUploadedFile('x.pdf', b'%PDF', content_type='application/pdf'),
+        }
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            r = self.client.post(self._url(), data)
+        resp = json.loads(r.content)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(resp['docs_created'], 0)
+
+    def test_non_bill_attachment_skipped(self):
+        from agents.models import APDocument
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test.utils import override_settings
+        before = APDocument.objects.filter(tenant=self.tenant).count()
+        data = {
+            'Subject': 'Test',
+            'sender': 'x@x.com',
+            'recipient': f'{self.tenant.slug}@bills.ealedgers.com',
+            'attachment-1': SimpleUploadedFile('sig.ics', b'BEGIN:VCALENDAR', content_type='text/calendar'),
+        }
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            self.client.post(self._url(), data)
+        self.assertEqual(APDocument.objects.filter(tenant=self.tenant).count(), before)
+
+    def test_dispatches_bus_event_for_email_doc(self):
+        from django.test.utils import override_settings
+        with override_settings(AP_EMAIL_WEBHOOK_TOKEN=self.TOKEN):
+            self._post()
+        ev = BusEvent.objects.filter(tenant=self.tenant, event_type='bill.received').last()
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.payload.get('source'), 'email')

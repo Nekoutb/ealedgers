@@ -1,5 +1,6 @@
 """URL configuration for ea_accounting project."""
 
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.views import LoginView
 from django.urls import include, path
@@ -54,6 +55,14 @@ urlpatterns = [
     path('erp/<int:pk>/edit/', erp_connection_edit, name='erp_connection_edit'),
     # Knowledge layer (retrieval API + rule explorer + tenant procedures)
     path('knowledge/', include('knowledge.urls', namespace='knowledge')),
+    # Ingestion layer (document upload + email-to-bill webhook — Step 52)
+    path('ingest/', include('ingest.urls', namespace='ingest')),
     # Django admin houses the CRUD UIs that the module nav links into
     path('admin/', admin.site.urls),
 ]
+
+# Serve uploaded source documents in development (nginx handles MEDIA in prod).
+if settings.DEBUG:
+    from django.conf.urls.static import static
+
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

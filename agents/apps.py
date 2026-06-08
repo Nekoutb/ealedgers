@@ -19,3 +19,10 @@ class AgentsConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'agents'
     verbose_name = 'Agents (virtual finance departments)'
+
+    def ready(self):
+        # Subscribe the dispatcher to inbound work events so a received
+        # document (Step 52) is routed to its department's queue on the bus.
+        # Idempotent — safe across worker reloads (subscribe de-duplicates).
+        from agents.dispatcher import register_dispatcher
+        register_dispatcher()

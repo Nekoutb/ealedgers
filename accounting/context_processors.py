@@ -29,6 +29,7 @@ def _item(label, url=None):
 NAV = [
     _menu("Knowledge Base", url="/knowledge/explorer/"),
     _menu("Departments", url="/departments/"),
+    _menu("Inbox", url="/ingest/upload/"),
     _menu("Agent Activity", url="/agents/"),
     _menu("ERP Connections", url="/erp/"),
     _menu("Ledger", url="/admin/accounting/"),

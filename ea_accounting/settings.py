@@ -203,6 +203,15 @@ AP_EMAIL_WEBHOOK_TOKEN = os.environ.get(
     'AP_EMAIL_WEBHOOK_TOKEN', 'dev-webhook-token-change-in-prod'
 )
 
+# Anthropic API — AP Extractor LLM extraction (Step 53).
+# Set ANTHROPIC_API_KEY via env var in production.  In dev, leave blank and
+# APExtractor.run() returns SpecialistResult(ok=False, error=...) gracefully
+# rather than crashing the pipeline.
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+ANTHROPIC_EXTRACTION_MODEL = os.environ.get(
+    'ANTHROPIC_EXTRACTION_MODEL', 'claude-3-5-haiku-20241022'
+)
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Authentication flow ---------------------------------------------------

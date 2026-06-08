@@ -1,28 +1,33 @@
-"""D01 — Accounts Payable department (scaffold, Step 51).
+"""D01 — Accounts Payable department.
 
 Concrete classes for the AP department:
 
     APExtractor   — extracts vendor / date / lines / totals from raw document
-    APClassifier  — suggests SYSCOHADA account codes for each line
-    APProposer    — builds candidate JE from classifier output
-    APReviewer    — adversarial citation check (K10 IS, K12 WHT rules)
+                    (Step 53 — Anthropic LLM extraction, IMPLEMENTED)
+    APClassifier  — suggests SYSCOHADA account codes for each line (Step 54)
+    APProposer    — builds candidate JE from classifier output (Step 55)
+    APReviewer    — adversarial citation check (K10 IS, K12 WHT rules) (Step 56)
     APManager     — wires the specialist pipeline in order
     APDepartment  — the D01 BaseDepartment concrete class
 
-All specialists are stubs in this step; LLM/OCR integrations land in:
-  - Step 52 — bill-received document ingestion handler
-  - Step 53 — APExtractor (OCR + LLM structured extraction)
-  - Step 54 — APClassifier (account-code suggestion via knowledge retrieval)
-  - Step 55 — APProposer (build candidate SYSCOHADA JE)
-  - Step 56 — APReviewer (adversarial citation check)
-  - Step 58 — APDepartment.execute() (ERP CAP.05 + CAP.03)
-  - Step 60 — auto-approval rule engine (can_auto_approve override)
+LLM/OCR integrations status:
+  - Step 52 — APDocument ingestion + BusEvent dispatch  ✓ done
+  - Step 53 — APExtractor (Anthropic tool_use extraction) ✓ done (this file)
+  - Step 54 — APClassifier (account-code suggestion)      stub → Step 54
+  - Step 55 — APProposer (SYSCOHADA JE builder)           stub → Step 55
+  - Step 56 — APReviewer (adversarial citation check)     stub → Step 56
+  - Step 58 — APDepartment.execute() (CAP.05 + CAP.03)   stub → Step 58
+  - Step 60 — auto-approval rule engine                   stub → Step 60
 
 The pipeline, manager, and department classes are production-ready —
-no changes to their wiring are expected as the stubs are filled in.
+no changes to their wiring are expected as the remaining stubs are filled in.
 """
 
 from __future__ import annotations
+
+import os
+
+from django.conf import settings as djsettings
 
 from agents.department import (
     BaseDepartment,
@@ -41,23 +46,128 @@ from agents.department import (
 class APExtractor(DepartmentSpecialist):
     """Extract structured fields from a raw vendor-bill document (Step 53).
 
+    Reads the uploaded file from ``MEDIA_ROOT`` using the ``file_path`` key
+    set by the ap_inbox view when the BusEvent is dispatched, then calls the
+    Anthropic Messages API (tool_use) to extract structured fields.
+
     Input keys expected in ``input_data``:
-        document_path  — local file path or URL to the PDF / image
-        raw_text       — optional pre-extracted text (skips OCR when provided)
+        file_path      — path to the file, relative to MEDIA_ROOT
+                         (also accepted: ``document_path`` as an alias)
+        content_type   — MIME type (optional; inferred from extension if absent)
 
     Output keys on success:
         vendor_name, vendor_vat, invoice_date, due_date,
         invoice_number, currency, subtotal, tax_amount, total,
         lines: [{description, quantity, unit_price, amount}]
+
+    The specialist never raises — failures are returned as
+    ``SpecialistResult(ok=False, error=…)`` so the pipeline handles them
+    through the normal stop_on_failure mechanism.
     """
 
     specialist_type = "extractor"
 
-    def run(self, input_data: dict) -> SpecialistResult:  # pragma: no cover
-        """Stub — OCR + LLM extraction implemented in Step 53."""
-        raise NotImplementedError(
-            "APExtractor.run() is not yet implemented. "
-            "LLM/OCR extraction lands in Step 53."
+    # Extension → MIME type mapping (for content_type inference)
+    _EXT_TO_TYPE: dict[str, str] = {
+        ".pdf":  "application/pdf",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png":  "image/png",
+        ".tif":  "image/tiff",
+        ".tiff": "image/tiff",
+        ".webp": "image/webp",
+    }
+
+    def __init__(self, tenant, context=None, *, extractor_client=None, extractor_model=None):
+        """
+        Args:
+            tenant:            The Tenant instance (passed to DepartmentSpecialist).
+            context:           Optional context dict.
+            extractor_client:  Injectable Anthropic client for testing (Mock).
+                               When None, a real client is created from settings.
+            extractor_model:   Model ID override for testing.
+        """
+        super().__init__(tenant, context)
+        from agents.ap.extractor import AnthropicBillExtractor
+        self._extractor = AnthropicBillExtractor(
+            client=extractor_client,
+            model=extractor_model,
+        )
+
+    def run(self, input_data: dict) -> SpecialistResult:
+        """Extract vendor / date / lines / totals from the bill document.
+
+        Returns SpecialistResult(ok=True, output={...}) on success.
+        Returns SpecialistResult(ok=False, error=...) on any failure — never raises.
+        """
+        from agents.ap.extractor import ExtractorError
+
+        # --- 1. Resolve file path ---
+        rel_path = input_data.get("file_path") or input_data.get("document_path", "")
+        if not rel_path:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error="No file_path or document_path in input_data.",
+            )
+
+        # Absolute paths (e.g. temp files in tests) bypass MEDIA_ROOT join
+        if os.path.isabs(rel_path):
+            abs_path = rel_path
+        else:
+            media_root = str(getattr(djsettings, "MEDIA_ROOT", ""))
+            abs_path = os.path.join(media_root, rel_path)
+
+        # --- 2. Check existence ---
+        if not os.path.exists(abs_path):
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Document file not found: {abs_path!r}",
+            )
+
+        # --- 3. Read file ---
+        try:
+            with open(abs_path, "rb") as fh:
+                file_bytes = fh.read()
+        except OSError as exc:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Could not read document: {exc}",
+            )
+
+        # --- 4. Determine content type ---
+        content_type = input_data.get("content_type", "")
+        if not content_type:
+            ext = os.path.splitext(rel_path)[1].lower()
+            content_type = self._EXT_TO_TYPE.get(ext, "application/pdf")
+
+        # --- 5. Call the LLM extractor ---
+        try:
+            extracted = self._extractor.extract(file_bytes, content_type)
+        except ExtractorError as exc:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Extraction failed: {exc}",
+            )
+        except Exception as exc:  # noqa: BLE001 — pipeline must not crash
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Unexpected extractor error: {type(exc).__name__}: {exc}",
+            )
+
+        return SpecialistResult(
+            specialist_type=self.specialist_type,
+            output=extracted,
+            ok=True,
         )
 
 
@@ -140,15 +250,15 @@ class APManager(DepartmentManager):
 
     Default pipeline order (matches the bill-processing lifecycle)::
 
-        APExtractor  — extract structured fields from raw document
-        APClassifier — suggest SYSCOHADA account codes per line
-        APProposer   — build candidate journal entry
-        APReviewer   — adversarial citation check against K10/K12 rules
+        APExtractor  — extract structured fields from raw document  (Step 53 ✓)
+        APClassifier — suggest SYSCOHADA account codes per line     (Step 54)
+        APProposer   — build candidate journal entry                (Step 55)
+        APReviewer   — adversarial citation check against K10/K12  (Step 56)
 
     ``stop_on_failure=True`` means the pipeline halts at the first failing
-    specialist. While all four are stubs (Steps 53–56 fill them in), the
-    first specialist (APExtractor) will always raise NotImplementedError,
-    so ``run()`` returns a single failed SpecialistResult in the interim.
+    specialist.  APExtractor is now implemented; APClassifier–APReviewer are
+    still stubs (Steps 54–56), so the pipeline currently halts at whichever
+    specialist fails first.
 
     Once all specialists are implemented the pipeline runs end-to-end
     without any changes to this class.

@@ -16,3 +16,7 @@ django-q2>=1.7
 # lazily, so the app boots without it but the ERP "test on save" path 500s.
 # Ships prebuilt abi3 manylinux wheels (no compiler needed on the server).
 cryptography>=43,<49
+# LLM extraction for AP Extractor specialist (Step 53).
+# Lazy import: the app boots fine without a configured ANTHROPIC_API_KEY;
+# APExtractor.run() returns SpecialistResult(ok=False) gracefully when absent.
+anthropic>=0.40.0

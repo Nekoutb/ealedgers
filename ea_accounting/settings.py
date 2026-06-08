@@ -179,6 +179,21 @@ DECIMAL_SEPARATOR = ','
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# --- Media (uploaded source documents — ingestion layer, Step 52) ----------
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Largest single source document we accept (PDF / image), in bytes. Vendor
+# bills are small; 25 MB is a generous ceiling that still blocks abuse.
+INGEST_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+# Shared secret guarding the email-to-bill webhook. When set (non-empty),
+# inbound POSTs to /ingest/email/ must present it via the ``X-Ingest-Token``
+# header or a ``token`` field. Left empty in dev so local testing works;
+# set ``INGEST_WEBHOOK_TOKEN`` in the environment for production.
+INGEST_WEBHOOK_TOKEN = os.environ.get('INGEST_WEBHOOK_TOKEN', '')
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Authentication flow ---------------------------------------------------

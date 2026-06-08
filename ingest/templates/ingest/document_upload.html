@@ -1,0 +1,141 @@
+{% extends "accounting/_app_base.html" %}
+{% block page_title %}Document Ingestion · EA Ledgers{% endblock %}
+
+{% block content %}
+<section class="ing">
+
+  <!-- ── Header ───────────────────────────────────── -->
+  <header class="ing-head">
+    <div>
+      <div class="ing-eyebrow">Ingestion</div>
+      <h1 class="ing-title">Document Ingestion</h1>
+      <p class="ing-lede">Upload a vendor bill, invoice, or other source document. It is routed
+        automatically to the right department's inbox (vendor bills → AP). You can also
+        forward bills by email to your tenant's inbound address.</p>
+    </div>
+  </header>
+
+  <!-- ── Flash messages ────────────────────────────────── -->
+  {% if messages %}
+    <ul class="ing-flash">
+      {% for message in messages %}
+        <li class="ing-flash-item ing-flash-item--{{ message.tags }}">{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <!-- ── Upload form ──────────────────────────────────── -->
+  <form class="ing-form" method="post" enctype="multipart/form-data"
+        action="{% url 'ingest:document_upload' %}">
+    {% csrf_token %}
+
+    <div class="ing-field">
+      <label class="ing-label" for="{{ form.doc_type.id_for_label }}">Document type</label>
+      {{ form.doc_type }}
+      {% if form.doc_type.errors %}<div class="ing-err">{{ form.doc_type.errors|join:", " }}</div>{% endif %}
+    </div>
+
+    <div class="ing-field">
+      <label class="ing-label" for="{{ form.file.id_for_label }}">Document (PDF or image)</label>
+      {{ form.file }}
+      {% if form.file.errors %}<div class="ing-err">{{ form.file.errors|join:", " }}</div>{% endif %}
+    </div>
+
+    <div class="ing-actions">
+      <button type="submit" class="ing-btn">Upload &amp; route</button>
+    </div>
+  </form>
+
+  <!-- ── Recent documents (the inbox) ──────────────────────── -->
+  <h2 class="ing-subhead">Recent documents</h2>
+  {% if recent %}
+    <div class="ing-table-wrap">
+      <table class="ing-table">
+        <thead>
+          <tr>
+            <th>Received</th>
+            <th>Type</th>
+            <th>Source</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Routed to</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for doc in recent %}
+          <tr>
+            <td class="ing-td-time">
+              <span class="ing-ts">{{ doc.created_at|date:"Y-m-d" }}</span>
+              <span class="ing-ts-time">{{ doc.created_at|time:"H:i" }}</span>
+            </td>
+            <td>{{ doc.get_doc_type_display }}</td>
+            <td><span class="ing-src">{{ doc.get_source_display }}</span></td>
+            <td class="ing-td-name">{{ doc.original_filename|default:doc.subject|default:"—"|truncatechars:48 }}</td>
+            <td><span class="ing-status ing-status--{{ doc.status }}">{{ doc.get_status_display }}</span></td>
+            <td>
+              {% if doc.routed_dept %}
+                <span class="ing-dept">{{ doc.get_routed_dept_display }}</span>
+              {% else %}
+                <span class="ing-none">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="ing-empty">
+      <p>No documents yet. Upload one above to see it routed to a department inbox.</p>
+    </div>
+  {% endif %}
+
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ing{--ink:#0a0a0a;--muted:#737373;--hair:#e5e5e5;--brand:#2E8B8E;--red:#b91c1c;--amber:#b45309;--green:#047857;color:var(--ink);}
+  .ing-head{padding-bottom:1.3rem;border-bottom:1px solid var(--hair);}
+  .ing-eyebrow{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:600;}
+  .ing-title{font-size:2.1rem;line-height:1.05;font-weight:650;letter-spacing:-.02em;margin:.3rem 0 .2rem;}
+  .ing-lede{color:var(--muted);max-width:62ch;font-size:.95rem;line-height:1.55;}
+
+  .ing-flash{list-style:none;padding:0;margin:1.2rem 0 0;display:flex;flex-direction:column;gap:.5rem;}
+  .ing-flash-item{padding:.6rem .9rem;border-radius:9px;font-size:.88rem;font-weight:500;}
+  .ing-flash-item--success{background:#d1fae5;color:#047857;}
+  .ing-flash-item--warning{background:#fef3c7;color:#92400e;}
+  .ing-flash-item--error{background:#fee2e2;color:#b91c1c;}
+
+  .ing-form{margin:1.5rem 0 2.5rem;display:flex;flex-direction:column;gap:1.1rem;max-width:520px;}
+  .ing-field{display:flex;flex-direction:column;gap:.35rem;}
+  .ing-label{font-size:.74rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .ing-field select,.ing-field input[type=file]{border:1px solid var(--hair);border-radius:9px;padding:.5rem .75rem;font-size:.9rem;background:#fff;color:var(--ink);}
+  .ing-field select:focus,.ing-field input[type=file]:focus{outline:2px solid var(--brand);outline-offset:2px;}
+  .ing-err{color:var(--red);font-size:.8rem;}
+  .ing-actions{margin-top:.3rem;}
+  .ing-btn{background:#0a0a0a;color:#fff;font-weight:600;font-size:.9rem;padding:.6rem 1.3rem;border:none;border-radius:10px;cursor:pointer;}
+  .ing-btn:hover{background:#262626;}
+
+  .ing-subhead{font-size:1.1rem;font-weight:650;letter-spacing:-.01em;margin:0 0 .8rem;}
+  .ing-table-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:13px;}
+  .ing-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+  .ing-table thead th{background:#fafafa;padding:.7rem .9rem;text-align:left;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border-bottom:1px solid var(--hair);white-space:nowrap;}
+  .ing-table tbody tr:not(:last-child){border-bottom:1px solid var(--hair);}
+  .ing-table td{padding:.65rem .9rem;vertical-align:top;}
+  .ing-table tbody tr:hover td{background:#fafafa;}
+  .ing-ts{display:block;font-weight:500;}
+  .ing-ts-time{display:block;font-size:.73rem;color:var(--muted);}
+  .ing-src{font-size:.78rem;color:#525252;}
+  .ing-td-name{max-width:260px;}
+  .ing-dept{font-weight:600;}
+  .ing-none{color:#d4d4d4;}
+  .ing-status{font-size:.7rem;font-weight:600;padding:.18rem .55rem;border-radius:999px;white-space:nowrap;}
+  .ing-status--received{background:#dbeafe;color:#1d4ed8;}
+  .ing-status--routed{background:#d1fae5;color:#047857;}
+  .ing-status--unrouted{background:#fef3c7;color:#92400e;}
+  .ing-empty{text-align:center;padding:3rem 1rem;color:var(--muted);border:1px dashed var(--hair);border-radius:13px;}
+
+  @media(max-width:640px){.ing-title{font-size:1.7rem;}}
+</style>
+{% endblock %}

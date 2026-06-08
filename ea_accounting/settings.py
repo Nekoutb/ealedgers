@@ -179,6 +179,30 @@ DECIMAL_SEPARATOR = ','
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# --- Media files (uploaded documents — AP bills, etc.) ---------------------
+# Files are stored in BASE_DIR/media/ in development and in the same
+# directory on the Vultr server. The Apache vhost serves /media/ directly
+# in production (no Django involvement at runtime — see reference_production.md).
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# AP document upload settings (Step 52)
+AP_DOCUMENT_MAX_SIZE_MB = int(os.environ.get('AP_DOCUMENT_MAX_SIZE_MB', '20'))
+AP_DOCUMENT_ALLOWED_TYPES = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/tiff',
+    'image/webp',
+]
+
+# Email-to-bill webhook token (Step 52).  Set via env var in production.
+# The dev fallback is a non-secret placeholder — any real deploy must set this.
+AP_EMAIL_WEBHOOK_TOKEN = os.environ.get(
+    'AP_EMAIL_WEBHOOK_TOKEN', 'dev-webhook-token-change-in-prod'
+)
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Authentication flow ---------------------------------------------------

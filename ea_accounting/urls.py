@@ -1,11 +1,15 @@
 """URL configuration for ea_accounting project."""
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.auth.views import LoginView
 from django.urls import include, path
 
 from accounting.views import (
     agent_activity,
+    ap_email_webhook,
+    ap_inbox,
     approver_assignment,
     capability_matrix,
     chain_detail,
@@ -42,6 +46,9 @@ urlpatterns = [
     # Audit-trail chain timeline (Step 50)
     path('workspace/chains/', chain_list, name='chain_list'),
     path('workspace/chains/<str:chain_id>/', chain_detail, name='chain_detail'),
+    # D01 AP dept inbox + email webhook (Step 52)
+    path('ap/inbox/', ap_inbox, name='ap_inbox'),
+    path('ap/webhook/email/', ap_email_webhook, name='ap_email_webhook'),
     # Platform pages — the virtual-finance-function vision (read-only skeletons
     # today; the agents fill them from Phase P03/P05+). The accounting data
     # layer itself is reached via the Django admin ("Ledger").
@@ -56,4 +63,6 @@ urlpatterns = [
     path('knowledge/', include('knowledge.urls', namespace='knowledge')),
     # Django admin houses the CRUD UIs that the module nav links into
     path('admin/', admin.site.urls),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Note: static() returns [] in production (when DEBUG=False); Apache/Nginx
+# serves /media/ directly. This only adds a URL pattern in development.

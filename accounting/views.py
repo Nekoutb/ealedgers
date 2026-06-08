@@ -13,13 +13,17 @@ was retired in the post-pivot cleanup — those flows belong to the department
 agents + the ERP, not hand-keyed screens.
 """
 
+import uuid
+
+from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Max, Min
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from connectors.capabilities import CAPABILITIES
@@ -112,21 +116,23 @@ MODULES = [
 ]
 
 
-# Department roster metadata for the org-chart skeleton (scope + the phase the
-# agent ships in). Codes/labels come from SUBSCRIBABLE_DEPARTMENTS.
+# Department roster metadata for the org-chart skeleton.
+# Tuple: (scope description, shipping phase, inbox URL or None)
+# The inbox URL is set for departments that have a live user-facing inbox
+# page; None for departments whose agent hasn't shipped yet.
 _DEPT_META = {
-    "D00": ("Cross-department orchestration, month-end close", "P11"),
-    "D01": ("Vendor bills, payments, withholding tax", "P05"),
-    "D02": ("Customer invoices, receipts, dunning", "P07"),
-    "D03": ("Bank, cash, FX, payment execution", "P08"),
-    "D04": ("Capex, componentisation, depreciation, disposals", "P09"),
-    "D05": ("Manual journal entries, accruals, reconciliations", "P10"),
-    "D06": ("TVA, WHT, IS, IRPP coordination, DGI filings", "P06"),
-    "D07": ("Payroll journal, CNPS, IRPP, certificates", "P16"),
-    "D08": ("Item master, receipts, issues, costing", "P17"),
-    "D09": ("Statutory pack, DGI filings, management reports", "P12"),
-    "D10": ("Class 9, cost centres, project costing", "P13"),
-    "D11": ("Budget, forecast, variance, scenarios", "P14"),
+    "D00": ("Cross-department orchestration, month-end close", "P11", None),
+    "D01": ("Vendor bills, payments, withholding tax",         "P05", "/ap/inbox/"),
+    "D02": ("Customer invoices, receipts, dunning",            "P07", None),
+    "D03": ("Bank, cash, FX, payment execution",               "P08", None),
+    "D04": ("Capex, componentisation, depreciation, disposals","P09", None),
+    "D05": ("Manual journal entries, accruals, reconciliations","P10", None),
+    "D06": ("TVA, WHT, IS, IRPP coordination, DGI filings",   "P06", None),
+    "D07": ("Payroll journal, CNPS, IRPP, certificates",       "P16", None),
+    "D08": ("Item master, receipts, issues, costing",          "P17", None),
+    "D09": ("Statutory pack, DGI filings, management reports", "P12", None),
+    "D10": ("Class 9, cost centres, project costing",          "P13", None),
+    "D11": ("Budget, forecast, variance, scenarios",           "P14", None),
 }
 
 
@@ -213,7 +219,7 @@ def workspace(request):
             sub = subs_by_dept.get(code)
             subscribed = sub is not None and bool(sub.active)
             agent_live = agent_enabled and subscribed
-            scope, phase = _DEPT_META.get(code, ('', ''))
+            scope, phase, inbox_url = _DEPT_META.get(code, ('', '', None))
             q_count = queue_counts.get(code, 0)
             dept_tiles.append({
                 'code': code,
@@ -223,6 +229,7 @@ def workspace(request):
                 'subscribed': subscribed,
                 'agent_live': agent_live,
                 'queue_count': q_count,
+                'url': inbox_url,  # None for departments without a live inbox yet
             })
             if subscribed:
                 n_subscribed += 1
@@ -405,7 +412,7 @@ def departments(request):
     subscribed = set(request.tenant.subscribed_departments())
     rows = []
     for code, label in SUBSCRIBABLE_DEPARTMENTS:
-        scope, phase = _DEPT_META.get(code, ("", ""))
+        scope, phase, _url = _DEPT_META.get(code, ("", "", None))
         rows.append({
             "code": code,
             "label": label,
@@ -610,3 +617,193 @@ def erp_operation_audit(request):
         "cap_choices": cap_choices,
         "filter_qs": filter_qs,
     })
+
+
+# ---------------------------------------------------------------------------
+# Step 52 — AP document ingestion (upload UI + email webhook)
+# ---------------------------------------------------------------------------
+
+_AP_ALLOWED_TYPES = [
+    'application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'image/webp',
+]
+
+
+def _ap_max_bytes():
+    """Return the current AP upload size cap in bytes (reads settings at request time)."""
+    return getattr(settings, 'AP_DOCUMENT_MAX_SIZE_MB', 20) * 1024 * 1024
+
+
+def _dispatch_bill_received(tenant, doc):
+    """Create a BusEvent(bill.received) and link it to ``doc``."""
+    chain_id = str(uuid.uuid4())
+    event = BusEvent.objects.create(
+        tenant=tenant,
+        event_type='bill.received',
+        chain_id=chain_id,
+        status='dispatched',
+        payload={
+            'dept_code': 'D01',
+            'ap_document_id': doc.pk,
+            'original_filename': doc.original_filename,
+            'file_path': doc.file.name,
+            'source': doc.source,
+        },
+    )
+    doc.chain_id = chain_id
+    doc.bus_event = event
+    doc.save(update_fields=['chain_id', 'bus_event'])
+    return event
+
+
+@login_required
+@tenant_required
+def ap_inbox(request):
+    """AP dept inbox — list inbound documents and handle bill uploads (Step 52).
+
+    GET  — renders the inbox list plus an upload form.
+    POST — validates and saves an uploaded vendor-bill document, then
+           dispatches a ``bill.received`` BusEvent so the AP department
+           can process it (Steps 53+).
+
+    Validation:
+        - File must be present and non-empty.
+        - Content-type must be in AP_DOCUMENT_ALLOWED_TYPES.
+        - File size must not exceed AP_DOCUMENT_MAX_SIZE_MB.
+    """
+    from agents.models import APDocument
+
+    tenant = request.tenant
+    save_errors = []
+    saved_doc = None
+
+    if request.method == 'POST':
+        uploaded = request.FILES.get('bill_file')
+        notes = request.POST.get('notes', '').strip()
+
+        if not uploaded:
+            save_errors.append("No file was selected. Please choose a PDF or image.")
+        else:
+            ct = uploaded.content_type or ''
+            allowed = getattr(settings, 'AP_DOCUMENT_ALLOWED_TYPES', _AP_ALLOWED_TYPES)
+            max_bytes = _ap_max_bytes()
+            limit_mb = getattr(settings, 'AP_DOCUMENT_MAX_SIZE_MB', 20)
+            if ct not in allowed:
+                save_errors.append(
+                    f"File type '{ct}' is not accepted. "
+                    "Please upload a PDF, JPEG, PNG, TIFF, or WebP."
+                )
+            elif uploaded.size > max_bytes:
+                save_errors.append(
+                    f"File is too large ({uploaded.size // 1024:,} KB). "
+                    f"Maximum allowed size is {limit_mb} MB."
+                )
+            else:
+                doc = APDocument.objects.create(
+                    tenant=tenant,
+                    uploaded_by=request.user,
+                    file=uploaded,
+                    original_filename=uploaded.name,
+                    content_type=ct,
+                    file_size=uploaded.size,
+                    source=APDocument.SOURCE_UPLOAD,
+                    status=APDocument.STATUS_RECEIVED,
+                    notes=notes,
+                )
+                _dispatch_bill_received(tenant, doc)
+                saved_doc = doc
+
+    # Fetch the 50 most recent documents for this tenant
+    documents = list(
+        APDocument.objects.filter(tenant=tenant)
+        .select_related('uploaded_by', 'bus_event')
+        .order_by('-received_at')[:50]
+    )
+
+    return render(request, 'accounting/ap_inbox.html', {
+        'documents': documents,
+        'save_errors': save_errors,
+        'saved_doc': saved_doc,
+        'max_mb': getattr(settings, 'AP_DOCUMENT_MAX_SIZE_MB', 20),
+        'tenant_name': tenant.name,
+    })
+
+
+@csrf_exempt
+@require_POST
+def ap_email_webhook(request):
+    """Email-to-bill webhook endpoint (Step 52).
+
+    Accepts inbound-email POSTs from Mailgun / SendGrid / Postmark.
+    Authentication: a shared secret token in the ``?token=`` query parameter
+    (configured via ``AP_EMAIL_WEBHOOK_TOKEN`` environment variable).
+
+    Expected multipart fields (Mailgun format; other providers are
+    similar and can be normalised here):
+        Subject     — email subject
+        sender      — sender address
+        attachment-1..N  — bill PDF / image attachments
+
+    On success: creates an ``APDocument`` for each attachment and
+    dispatches a ``bill.received`` BusEvent, returns HTTP 200 JSON.
+    On authentication failure: HTTP 403.
+    On bad request (no attachments, wrong type, oversized): HTTP 400.
+
+    Tenant routing: resolved from the recipient address using the
+    ``recipient`` field (format: ``<slug>@bills.ealedgers.com``).
+    If no matching tenant is found the request is accepted (HTTP 200)
+    but no document is created — avoids leaking tenant existence.
+    """
+    from agents.models import APDocument
+    from accounting.models import Tenant  # noqa: local import avoids circular
+
+    # --- token auth ---
+    expected = getattr(settings, 'AP_EMAIL_WEBHOOK_TOKEN', '')
+    provided = request.GET.get('token', '')
+    if not expected or provided != expected:
+        return HttpResponseForbidden('Invalid webhook token.')
+
+    subject = request.POST.get('Subject', request.POST.get('subject', ''))
+    sender = request.POST.get('sender', request.POST.get('from', ''))
+    recipient = request.POST.get('recipient', request.POST.get('to', ''))
+
+    # Resolve tenant from recipient slug (e.g. "elite-advisors@bills.ealedgers.com")
+    tenant = None
+    if recipient:
+        local_part = recipient.split('@')[0].strip().lower()
+        try:
+            tenant = Tenant.objects.get(slug=local_part)
+        except Tenant.DoesNotExist:
+            pass
+
+    if tenant is None:
+        # Silently accept — don't leak which slugs exist
+        return JsonResponse({'status': 'ok', 'docs_created': 0})
+
+    notes = f"From: {sender}\nSubject: {subject}"
+    docs_created = 0
+
+    allowed_wh = getattr(settings, 'AP_DOCUMENT_ALLOWED_TYPES', _AP_ALLOWED_TYPES)
+    max_bytes_wh = _ap_max_bytes()
+    for key, f in request.FILES.items():
+        if not key.startswith('attachment'):
+            continue
+        ct = f.content_type or 'application/octet-stream'
+        if ct not in allowed_wh:
+            continue  # skip non-bill attachments (signatures, calendars, etc.)
+        if f.size > max_bytes_wh:
+            continue  # too large — skip
+        doc = APDocument.objects.create(
+            tenant=tenant,
+            uploaded_by=None,    # email ingestion — no user
+            file=f,
+            original_filename=f.name or 'attachment.pdf',
+            content_type=ct,
+            file_size=f.size,
+            source=APDocument.SOURCE_EMAIL,
+            status=APDocument.STATUS_RECEIVED,
+            notes=notes,
+        )
+        _dispatch_bill_received(tenant, doc)
+        docs_created += 1
+
+    return JsonResponse({'status': 'ok', 'docs_created': docs_created})

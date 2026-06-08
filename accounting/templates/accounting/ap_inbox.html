@@ -1,0 +1,303 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AP Inbox · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<!-- top bar -->
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition flex-shrink-0">
+        <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
+        </svg>
+        <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+      </a>
+      <span class="text-neutral-300">/</span>
+      <span class="text-sm text-neutral-500">D01</span>
+      <span class="text-neutral-300">/</span>
+      <span class="text-sm font-medium text-neutral-800">AP Inbox</span>
+    </div>
+    <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+  </div>
+</header>
+
+<main class="flex-1 max-w-5xl mx-auto w-full px-6 py-10">
+
+  <!-- page heading -->
+  <div class="mb-8 flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <p class="text-eyebrow mb-1">D01 — Accounts Payable</p>
+      <h1 class="text-2xl font-semibold tracking-tight text-neutral-950">AP Inbox</h1>
+      <p class="text-sm text-neutral-500 mt-1">
+        Upload vendor bills for agent processing. Each document dispatches a
+        <code class="ap-code">bill.received</code> event and enters the specialist pipeline.
+      </p>
+    </div>
+    <a href="/workspace/chains/" class="btn btn-ghost text-xs">Audit trail →</a>
+  </div>
+
+  <!-- success banner -->
+  {% if saved_doc %}
+  <div class="ap-banner ap-banner--ok" role="status">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>
+      <strong>{{ saved_doc.original_filename }}</strong> received
+      ({{ saved_doc.file_size_kb }}).
+      Chain&nbsp;<code class="ap-code-sm">{{ saved_doc.chain_id_short }}&hellip;</code>
+      &mdash;
+      <a href="/workspace/chains/{{ saved_doc.chain_id }}/" class="ap-link">view in audit trail →</a>
+    </span>
+  </div>
+  {% endif %}
+
+  <!-- error banner -->
+  {% if save_errors %}
+  <div class="ap-banner ap-banner--err" role="alert">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2L14.5 14H1.5L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 7v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="12" r=".75" fill="currentColor"/></svg>
+    <ul class="ap-error-list">
+      {% for err in save_errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="ap-layout">
+
+    <!-- ===== UPLOAD FORM ===== -->
+    <section class="ap-upload-card" aria-label="Upload vendor bill">
+      <h2 class="ap-section-title">Upload bill</h2>
+      <p class="ap-section-sub">PDF, JPEG, PNG, TIFF or WebP &mdash; max {{ max_mb }}&thinsp;MB</p>
+
+      <form method="post" enctype="multipart/form-data" class="ap-form">
+        {% csrf_token %}
+
+        <div class="ap-drop-zone" id="dropZone">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <rect width="32" height="32" rx="8" fill="#f5f5f5"/>
+            <path d="M16 20V12M12 16l4-4 4 4" stroke="#a3a3a3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M10 22h12" stroke="#a3a3a3" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span class="ap-drop-label" id="dropLabel">Drop file here or <label for="billFile" class="ap-file-link">browse</label></span>
+          <input type="file" id="billFile" name="bill_file" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.webp"
+                 class="ap-file-input" aria-label="Choose bill file">
+        </div>
+
+        <div class="ap-field">
+          <label for="apNotes" class="ap-label">Notes (optional)</label>
+          <textarea id="apNotes" name="notes" rows="2"
+                    class="ap-textarea"
+                    placeholder="E.g. vendor name, email subject"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary ap-submit">Upload bill</button>
+      </form>
+    </section>
+
+    <!-- ===== DOCUMENT LIST ===== -->
+    <section class="ap-list-section" aria-label="Received bills">
+      <h2 class="ap-section-title">
+        Received
+        <span class="ap-count">{{ documents|length }}</span>
+      </h2>
+
+      {% if not documents %}
+      <div class="ap-empty">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="#f5f5f5"/>
+          <path d="M10 22V12l6-4 6 4v10H10Z" stroke="#d4d4d4" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M14 22v-5h4v5" stroke="#d4d4d4" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+        <p>No bills received yet.</p>
+        <p class="ap-empty-sub">Upload your first vendor bill using the form.</p>
+      </div>
+      {% else %}
+      <div class="ap-doc-list">
+        {% for doc in documents %}
+        <div class="ap-doc-row">
+          <!-- file icon by type -->
+          <div class="ap-doc-icon ap-doc-icon--{% if 'pdf' in doc.content_type %}pdf{% else %}img{% endif %}">
+            {% if 'pdf' in doc.content_type %}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect width="16" height="16" rx="3" fill="#fee2e2"/><path d="M4 4h5l3 3v5H4V4Z" stroke="#dc2626" stroke-width="1" stroke-linejoin="round"/><path d="M9 4v3h3" stroke="#dc2626" stroke-width="1" stroke-linejoin="round"/></svg>
+            {% else %}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect width="16" height="16" rx="3" fill="#dbeafe"/><rect x="3" y="3" width="10" height="10" rx="1.5" stroke="#3b82f6" stroke-width="1"/><path d="M3 10l3-3 3 3 2-2 2 2" stroke="#3b82f6" stroke-width="1" stroke-linejoin="round"/></svg>
+            {% endif %}
+          </div>
+
+          <!-- doc info -->
+          <div class="ap-doc-info">
+            <div class="ap-doc-name" title="{{ doc.original_filename }}">{{ doc.original_filename }}</div>
+            <div class="ap-doc-meta">
+              {{ doc.file_size_kb }}
+              &middot; {{ doc.received_at|date:"d M Y H:i" }}
+              {% if doc.chain_id %}
+              &middot; <a href="/workspace/chains/{{ doc.chain_id }}/" class="ap-link ap-chain-link">{{ doc.chain_id_short }}&hellip;</a>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- status + source badges -->
+          <div class="ap-doc-badges">
+            <span class="ap-status ap-status--{{ doc.status }}">{{ doc.get_status_display }}</span>
+            {% if doc.source == 'email' %}
+            <span class="ap-source-badge">📧 email</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+  </div><!-- ap-layout -->
+
+</main>
+
+<footer class="border-t border-neutral-200 bg-white mt-auto">
+  <div class="max-w-5xl mx-auto px-6 py-4 text-xs text-neutral-500 flex justify-between">
+    <div>© {{ tenant_name }} · EA Ledgers</div>
+    <div class="text-mono">v0.5 · D01 AP · SYSCOHADA · XAF</div>
+  </div>
+</footer>
+
+<style>
+  /* layout */
+  .ap-layout { display:grid; grid-template-columns:320px 1fr; gap:2rem; align-items:start; }
+  @media(max-width:768px) { .ap-layout { grid-template-columns:1fr; } }
+
+  /* section headings */
+  .ap-section-title { font-size:.95rem; font-weight:650; letter-spacing:-.01em; color:#0a0a0a;
+                      display:flex; align-items:center; gap:.5rem; }
+  .ap-section-sub   { font-size:.76rem; color:#a3a3a3; margin-top:.2rem; margin-bottom:1rem; }
+
+  /* upload card */
+  .ap-upload-card { background:#fff; border:1px solid #e5e5e5; border-radius:16px; padding:1.5rem; }
+
+  /* drop zone */
+  .ap-drop-zone { border:2px dashed #e5e5e5; border-radius:10px; padding:1.5rem 1rem;
+                  display:flex; flex-direction:column; align-items:center; gap:.6rem;
+                  cursor:pointer; transition:border-color .14s ease, background .14s ease; }
+  .ap-drop-zone:hover, .ap-drop-zone.ap-drag-over { border-color:#a3a3a3; background:#fafafa; }
+  .ap-drop-label { font-size:.8rem; color:#737373; text-align:center; }
+  .ap-file-link { color:#0a0a0a; font-weight:600; cursor:pointer; text-decoration:underline;
+                  text-underline-offset:2px; }
+  .ap-file-input { position:absolute; opacity:0; width:0; height:0; }
+
+  /* form fields */
+  .ap-form { display:flex; flex-direction:column; gap:1rem; }
+  .ap-field { display:flex; flex-direction:column; gap:.35rem; }
+  .ap-label { font-size:.76rem; font-weight:600; color:#404040; letter-spacing:.02em; }
+  .ap-textarea { width:100%; border:1px solid #e5e5e5; border-radius:8px; padding:.55rem .75rem;
+                 font-size:.85rem; font-family:inherit; color:#0a0a0a; resize:vertical;
+                 transition:border-color .12s ease; outline:none; }
+  .ap-textarea:focus { border-color:#404040; }
+  .ap-submit { width:100%; }
+
+  /* banners */
+  .ap-banner { display:flex; align-items:flex-start; gap:.55rem; padding:.7rem 1rem;
+               border-radius:10px; font-size:.8rem; margin-bottom:1.25rem; line-height:1.5; }
+  .ap-banner--ok  { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+  .ap-banner--err { background:#fff1f2; border:1px solid #fecdd3; color:#be123c; }
+  .ap-error-list  { margin:0; padding-left:1.1rem; }
+  .ap-banner svg  { flex-shrink:0; margin-top:.1rem; }
+
+  /* count badge */
+  .ap-count { display:inline-flex; align-items:center; justify-content:center;
+              min-width:18px; height:18px; font-size:.65rem; font-weight:700;
+              background:#f5f5f5; color:#737373; border-radius:999px; padding:0 .35rem; }
+
+  /* doc list section */
+  .ap-list-section { }
+  .ap-doc-list { display:flex; flex-direction:column; gap:.5rem; margin-top:.75rem; }
+
+  /* single doc row */
+  .ap-doc-row { display:flex; align-items:center; gap:.75rem; background:#fff;
+                border:1px solid #f0f0f0; border-radius:10px; padding:.7rem .9rem; }
+  .ap-doc-icon { flex-shrink:0; }
+  .ap-doc-info { flex:1; min-width:0; }
+  .ap-doc-name { font-size:.85rem; font-weight:600; color:#0a0a0a; white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis; }
+  .ap-doc-meta { font-size:.72rem; color:#a3a3a3; margin-top:.15rem;
+                 font-family:'Geist Mono','Courier New',monospace; }
+  .ap-doc-badges { display:flex; gap:.35rem; align-items:center; flex-shrink:0; flex-wrap:wrap; }
+
+  /* status badges */
+  .ap-status { font-size:.63rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+               padding:.12rem .42rem; border-radius:999px; }
+  .ap-status--received   { background:#dbeafe; color:#1d4ed8; }
+  .ap-status--processing { background:#fef3c7; color:#b45309; }
+  .ap-status--processed  { background:#dcfce7; color:#15803d; }
+  .ap-status--failed     { background:#fee2e2; color:#b91c1c; }
+
+  /* source badge */
+  .ap-source-badge { font-size:.63rem; color:#a3a3a3; }
+
+  /* links */
+  .ap-link { color:#404040; font-weight:600; text-underline-offset:2px; }
+  .ap-chain-link { font-family:'Geist Mono','Courier New',monospace; font-size:.7rem; font-weight:500; }
+
+  /* code */
+  .ap-code    { font-family:'Geist Mono','Courier New',monospace; font-size:.8em;
+                background:#f5f5f5; padding:.1rem .3rem; border-radius:4px; }
+  .ap-code-sm { font-family:'Geist Mono','Courier New',monospace; font-size:.75em; }
+
+  /* empty state */
+  .ap-empty { text-align:center; padding:3rem 1rem; color:#a3a3a3; font-size:.82rem; }
+  .ap-empty svg { margin:0 auto .75rem; }
+  .ap-empty-sub { font-size:.74rem; color:#d4d4d4; margin-top:.3rem; }
+</style>
+
+<script>
+/* Drag-and-drop enhancement + filename display */
+(function() {
+  const zone = document.getElementById('dropZone');
+  const input = document.getElementById('billFile');
+  const label = document.getElementById('dropLabel');
+
+  if (!zone || !input) return;
+
+  function updateLabel(file) {
+    if (file) {
+      label.textContent = file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+    }
+  }
+
+  input.addEventListener('change', function() {
+    if (input.files && input.files[0]) updateLabel(input.files[0]);
+  });
+
+  zone.addEventListener('click', function(e) {
+    if (e.target !== input) input.click();
+  });
+
+  zone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    zone.classList.add('ap-drag-over');
+  });
+  zone.addEventListener('dragleave', function() {
+    zone.classList.remove('ap-drag-over');
+  });
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    zone.classList.remove('ap-drag-over');
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files[0]) {
+      // Assign to the input so the form picks it up
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(dt.files[0]);
+      input.files = dataTransfer.files;
+      updateLabel(dt.files[0]);
+    }
+  });
+})();
+</script>
+</body>
+</html>

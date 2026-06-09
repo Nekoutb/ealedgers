@@ -1,9 +1,11 @@
-"""Tests for the D01 AP department — Steps 51 and 53.
+"""Tests for the D01 AP department — Steps 51, 53, and 54.
 
 Coverage:
   - Specialist hierarchy (subclasses, specialist_type, stubs raise NotImplementedError)
   - APExtractor.run() — Step 53 LLM extraction logic (mocked Anthropic client)
   - AnthropicBillExtractor unit tests (content block builder, response parser)
+  - APClassifier.run() — Step 54 SYSCOHADA account classification (mocked client)
+  - AnthropicLineClassifier unit tests (account loading, response parser, merge)
   - APManager pipeline wiring (order, stop_on_failure, run-to-first-failure)
   - APDepartment class attributes (dept_code, dept_name, capabilities_needed)
   - APDepartment.handle() subscription gate (DepartmentDisabledError when disabled)
@@ -93,9 +95,10 @@ class APSpecialistHierarchyTests(TestCase):
         result = APExtractor(_FakeTenant()).run({})
         self.assertFalse(result.ok)
 
-    def test_classifier_run_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            APClassifier(_FakeTenant()).run({})
+    def test_classifier_run_returns_ok_true_for_empty_input(self):
+        """APClassifier.run() no longer raises — empty lines returns ok=True."""
+        result = APClassifier(_FakeTenant()).run({})
+        self.assertTrue(result.ok)
 
     def test_reviewer_run_raises_not_implemented(self):
         with self.assertRaises(NotImplementedError):
@@ -532,3 +535,256 @@ class AnthropicBillExtractorTests(TestCase):
         resp.stop_reason = "end_turn"
         with self.assertRaises(ExtractorError):
             AnthropicBillExtractor._parse_response(resp)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for classifier tests
+# ---------------------------------------------------------------------------
+
+def _make_classify_mock_client(classified_lines: list):
+    """Return a mock Anthropic client returning ``classified_lines`` as tool output."""
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.name = "classify_lines"
+    tool_block.input = {"classified_lines": classified_lines}
+
+    mock_response = MagicMock()
+    mock_response.stop_reason = "tool_use"
+    mock_response.content = [tool_block]
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    return mock_client
+
+
+_SAMPLE_LINES = [
+    {"description": "Telephone charges", "quantity": 1, "unit_price": 50000, "amount": 50000},
+    {"description": "Office supplies", "quantity": 10, "unit_price": 2000, "amount": 20000},
+]
+
+_SAMPLE_CLASSIFIED = [
+    {
+        "line_index": 0,
+        "suggested_account": "628100",
+        "suggested_account_name": "Telephone charges",
+        "confidence": "high",
+        "reasoning": "Direct match to telecom account.",
+    },
+    {
+        "line_index": 1,
+        "suggested_account": "604100",
+        "suggested_account_name": "Consumables",
+        "confidence": "medium",
+        "reasoning": "Office supplies map to consumables.",
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# APClassifier.run() — Step 54 integration-style tests (injected mock client)
+# ---------------------------------------------------------------------------
+
+class APClassifierTests(TestCase):
+    """APClassifier.run() with a mocked Anthropic client and real DB accounts."""
+
+    @classmethod
+    def setUpTestData(cls):
+        """Create a minimal tenant with two expense accounts for classifier tests."""
+        from accounting.models import Currency, Tenant, Account
+
+        cls.currency = Currency.objects.create(
+            code="XAF_54a", name="CFA Franc (Step 54a)", symbol="XAF", decimal_places=0
+        )
+        cls.tenant = Tenant.objects.create(
+            name="Classifier Test Co", slug="classifier-test-co-54", currency=cls.currency
+        )
+        # Two expense accounts for the tenant
+        Account.objects.create(
+            tenant=cls.tenant, code="628100", name="Telephone charges",
+            type="expense_direct_cost", deprecated=False,
+        )
+        Account.objects.create(
+            tenant=cls.tenant, code="604100", name="Consumables",
+            type="expense", deprecated=False,
+        )
+
+    def _make_classifier(self, classified_lines=None):
+        client = _make_classify_mock_client(classified_lines or _SAMPLE_CLASSIFIED)
+        return APClassifier(self.tenant, classifier_client=client, classifier_model="test-model")
+
+    # --- empty lines → ok=True, classified_lines=[] ---
+
+    def test_run_returns_ok_true_for_empty_lines(self):
+        classifier = APClassifier(self.tenant)
+        result = classifier.run({"lines": []})
+        self.assertTrue(result.ok)
+
+    def test_run_empty_lines_output_is_empty_list(self):
+        classifier = APClassifier(self.tenant)
+        result = classifier.run({"lines": []})
+        self.assertEqual(result.output["classified_lines"], [])
+
+    def test_run_returns_ok_true_when_lines_key_absent(self):
+        """Missing 'lines' key treated as empty list → ok=True."""
+        classifier = APClassifier(self.tenant)
+        result = classifier.run({})
+        self.assertTrue(result.ok)
+
+    # --- happy path ---
+
+    def test_run_returns_ok_true_with_mock_client(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        self.assertTrue(result.ok)
+
+    def test_run_output_contains_classified_lines(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        self.assertIn("classified_lines", result.output)
+
+    def test_run_classified_lines_length_matches_input(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        self.assertEqual(len(result.output["classified_lines"]), len(_SAMPLE_LINES))
+
+    def test_run_classified_line_has_suggested_account(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        line = result.output["classified_lines"][0]
+        self.assertEqual(line["suggested_account"], "628100")
+
+    def test_run_classified_line_has_confidence(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        line = result.output["classified_lines"][0]
+        self.assertIn(line["confidence"], ("high", "medium", "low"))
+
+    def test_run_classified_line_preserves_original_description(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        self.assertEqual(result.output["classified_lines"][0]["description"], "Telephone charges")
+
+    def test_run_specialist_type_is_classifier_on_success(self):
+        result = self._make_classifier().run({"lines": _SAMPLE_LINES})
+        self.assertEqual(result.specialist_type, "classifier")
+
+    # --- API error → ok=False ---
+
+    def test_run_ok_false_on_api_error(self):
+        bad_client = MagicMock()
+        bad_client.messages.create.side_effect = RuntimeError("timeout")
+        classifier = APClassifier(self.tenant, classifier_client=bad_client)
+        result = classifier.run({"lines": _SAMPLE_LINES})
+        self.assertFalse(result.ok)
+        self.assertIn("timeout", result.error)
+
+    # --- bad API response (no tool_use block) → ok=False ---
+
+    def test_run_ok_false_when_no_tool_use_in_response(self):
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "I cannot classify."
+        bad_resp = MagicMock()
+        bad_resp.stop_reason = "end_turn"
+        bad_resp.content = [text_block]
+        bad_client = MagicMock()
+        bad_client.messages.create.return_value = bad_resp
+        classifier = APClassifier(self.tenant, classifier_client=bad_client)
+        result = classifier.run({"lines": _SAMPLE_LINES})
+        self.assertFalse(result.ok)
+
+    # --- no accounts for tenant → ok=False ---
+
+    def test_run_ok_false_when_no_accounts_for_tenant(self):
+        from accounting.models import Currency, Tenant
+
+        currency = Currency.objects.create(
+            code="XAF_54b", name="CFA Franc (Step 54b)", symbol="XAF", decimal_places=0
+        )
+        empty_tenant = Tenant.objects.create(
+            name="Empty Tenant 54", slug="empty-tenant-54", currency=currency
+        )
+        mock_client = _make_classify_mock_client(_SAMPLE_CLASSIFIED)
+        classifier = APClassifier(empty_tenant, classifier_client=mock_client)
+        result = classifier.run({"lines": _SAMPLE_LINES})
+        self.assertFalse(result.ok)
+        self.assertIn("accounts", result.error.lower())
+
+
+# ---------------------------------------------------------------------------
+# AnthropicLineClassifier unit tests — helpers + response parser
+# ---------------------------------------------------------------------------
+
+class AnthropicLineClassifierTests(TestCase):
+    """Pure-unit tests for AnthropicLineClassifier helpers."""
+
+    # --- _api_client raises ClassifierError without a key ---
+
+    def test_api_client_raises_classifier_error_without_key(self):
+        from agents.ap.classifier import AnthropicLineClassifier, ClassifierError
+        from django.test import override_settings
+
+        env_bak = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            with override_settings(ANTHROPIC_API_KEY=""):
+                clf = AnthropicLineClassifier()
+                with self.assertRaises(ClassifierError):
+                    _ = clf._api_client
+        finally:
+            if env_bak is not None:
+                os.environ["ANTHROPIC_API_KEY"] = env_bak
+
+    # --- _parse_response ---
+
+    def test_parse_response_returns_classified_lines(self):
+        from agents.ap.classifier import AnthropicLineClassifier
+
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.name = "classify_lines"
+        tool_block.input = {
+            "classified_lines": [
+                {"line_index": 0, "suggested_account": "628100",
+                 "suggested_account_name": "Telephone charges", "confidence": "high"}
+            ]
+        }
+        resp = MagicMock()
+        resp.content = [tool_block]
+        result = AnthropicLineClassifier._parse_response(resp)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["suggested_account"], "628100")
+
+    def test_parse_response_raises_classifier_error_on_missing_tool_use(self):
+        from agents.ap.classifier import AnthropicLineClassifier, ClassifierError
+
+        text_block = MagicMock()
+        text_block.type = "text"
+        resp = MagicMock()
+        resp.content = [text_block]
+        resp.stop_reason = "end_turn"
+        with self.assertRaises(ClassifierError):
+            AnthropicLineClassifier._parse_response(resp)
+
+    # --- _merge_results ---
+
+    def test_merge_results_preserves_original_fields(self):
+        from agents.ap.classifier import AnthropicLineClassifier
+
+        originals = [{"description": "Test", "amount": 1000}]
+        classifications = [
+            {"line_index": 0, "suggested_account": "628100",
+             "suggested_account_name": "Telephone charges", "confidence": "high",
+             "reasoning": "Match."}
+        ]
+        merged = AnthropicLineClassifier._merge_results(originals, classifications)
+        self.assertEqual(merged[0]["description"], "Test")
+        self.assertEqual(merged[0]["amount"], 1000)
+        self.assertEqual(merged[0]["suggested_account"], "628100")
+
+    def test_merge_results_fills_missing_classification_with_low_confidence(self):
+        """If Claude misses a line index, the output is still the same length."""
+        from agents.ap.classifier import AnthropicLineClassifier
+
+        originals = [{"description": "A"}, {"description": "B"}]
+        classifications = [
+            {"line_index": 0, "suggested_account": "628100",
+             "suggested_account_name": "Telephone", "confidence": "high"}
+        ]
+        merged = AnthropicLineClassifier._merge_results(originals, classifications)
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[1]["confidence"], "low")
+        self.assertEqual(merged[1]["suggested_account"], "")

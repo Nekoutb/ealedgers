@@ -174,23 +174,78 @@ class APExtractor(DepartmentSpecialist):
 class APClassifier(DepartmentSpecialist):
     """Suggest SYSCOHADA account codes for each extracted bill line (Step 54).
 
-    Input keys (built up from APExtractor output):
+    Receives the merged context from APExtractor and classifies each line
+    against the tenant's chart of accounts via the Anthropic API.
+
+    Input keys expected in ``input_data`` (from APExtractor output):
         lines — list of {description, quantity, unit_price, amount}
 
     Output keys on success:
         classified_lines — list of {
             description, quantity, unit_price, amount,
-            suggested_account, suggested_account_name, confidence
+            suggested_account, suggested_account_name, confidence, reasoning
         }
+
+    The specialist never raises — failures are returned as
+    ``SpecialistResult(ok=False, error=…)`` so the pipeline handles them
+    through the normal stop_on_failure mechanism.
     """
 
     specialist_type = "classifier"
 
-    def run(self, input_data: dict) -> SpecialistResult:  # pragma: no cover
-        """Stub — knowledge-retrieval classification implemented in Step 54."""
-        raise NotImplementedError(
-            "APClassifier.run() is not yet implemented. "
-            "Account-code classification lands in Step 54."
+    def __init__(self, tenant, context=None, *, classifier_client=None, classifier_model=None):
+        """
+        Args:
+            tenant:            The Tenant instance (passed to DepartmentSpecialist).
+            context:           Optional context dict.
+            classifier_client: Injectable Anthropic client for testing (Mock).
+            classifier_model:  Model ID override for testing.
+        """
+        super().__init__(tenant, context)
+        from agents.ap.classifier import AnthropicLineClassifier
+        self._classifier = AnthropicLineClassifier(
+            client=classifier_client,
+            model=classifier_model,
+        )
+
+    def run(self, input_data: dict) -> SpecialistResult:
+        """Classify each bill line with a SYSCOHADA account code.
+
+        Returns SpecialistResult(ok=True, output={'classified_lines': [...]}) on success.
+        Returns SpecialistResult(ok=False, error=...) on any failure — never raises.
+        """
+        from agents.ap.classifier import ClassifierError
+
+        lines = input_data.get("lines", [])
+        # An empty lines list is a valid (if unusual) result — return ok=True
+        if not lines:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={"classified_lines": []},
+                ok=True,
+            )
+
+        try:
+            classified = self._classifier.classify(lines, self.tenant)
+        except ClassifierError as exc:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Classification failed: {exc}",
+            )
+        except Exception as exc:  # noqa: BLE001 — pipeline must not crash
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Unexpected classifier error: {type(exc).__name__}: {exc}",
+            )
+
+        return SpecialistResult(
+            specialist_type=self.specialist_type,
+            output={"classified_lines": classified},
+            ok=True,
         )
 
 
@@ -251,14 +306,13 @@ class APManager(DepartmentManager):
     Default pipeline order (matches the bill-processing lifecycle)::
 
         APExtractor  — extract structured fields from raw document  (Step 53 ✓)
-        APClassifier — suggest SYSCOHADA account codes per line     (Step 54)
+        APClassifier — suggest SYSCOHADA account codes per line     (Step 54 ✓)
         APProposer   — build candidate journal entry                (Step 55)
         APReviewer   — adversarial citation check against K10/K12  (Step 56)
 
     ``stop_on_failure=True`` means the pipeline halts at the first failing
-    specialist.  APExtractor is now implemented; APClassifier–APReviewer are
-    still stubs (Steps 54–56), so the pipeline currently halts at whichever
-    specialist fails first.
+    specialist.  APExtractor and APClassifier are implemented; APProposer and
+    APReviewer are still stubs (Steps 55–56).
 
     Once all specialists are implemented the pipeline runs end-to-end
     without any changes to this class.

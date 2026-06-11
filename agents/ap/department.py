@@ -13,8 +13,8 @@ Concrete classes for the AP department:
 LLM/OCR integrations status:
   - Step 52 — APDocument ingestion + BusEvent dispatch  ✓ done
   - Step 53 — APExtractor (Anthropic tool_use extraction) ✓ done (this file)
-  - Step 54 — APClassifier (account-code suggestion)      stub → Step 54
-  - Step 55 — APProposer (SYSCOHADA JE builder)           stub → Step 55
+  - Step 54 — APClassifier (account-code suggestion)      ✓ done
+  - Step 55 — APProposer (SYSCOHADA JE builder)           ✓ done (agents/ap/proposer.py)
   - Step 56 — APReviewer (adversarial citation check)     stub → Step 56
   - Step 58 — APDepartment.execute() (CAP.05 + CAP.03)   stub → Step 58
   - Step 60 — auto-approval rule engine                   stub → Step 60
@@ -252,25 +252,75 @@ class APClassifier(DepartmentSpecialist):
 class APProposer(DepartmentSpecialist):
     """Build a candidate SYSCOHADA journal entry from classifier output (Step 55).
 
-    Input keys (built up from APClassifier output):
-        classified_lines — from APClassifier
-        vendor_name, invoice_date, total — from APExtractor
+    Deterministic — no LLM call.  Takes the merged extractor + classifier
+    context and assembles a balanced double-entry vendor-bill JE, resolving the
+    supplier (401x), deductible-VAT (445x) and purchase-journal accounts from
+    the tenant's own chart of accounts (see :mod:`agents.ap.proposer`).
+
+    Input keys (built up from APClassifier / APExtractor output):
+        classified_lines — from APClassifier (each with suggested_account, amount)
+        vendor_name, vendor_vat, invoice_date, invoice_number,
+        currency, tax_amount, total — from APExtractor
 
     Output keys on success:
         proposed_je — {
             date, ref, journal_code,
             lines: [{account, label, debit, credit, partner_vat}]
         }
-        debit_total, credit_total, balanced — bool
+        debit_total, credit_total, balanced (bool),
+        currency, extracted_total, total_matches (bool),
+        issues (list[str]), needs_review (bool)
+
+    The specialist never raises — failures (no usable lines, no supplier
+    account) are returned as ``SpecialistResult(ok=False, error=…)`` so the
+    pipeline handles them through the normal stop_on_failure mechanism.
     """
 
     specialist_type = "proposer"
 
-    def run(self, input_data: dict) -> SpecialistResult:  # pragma: no cover
-        """Stub — JE builder implemented in Step 55."""
-        raise NotImplementedError(
-            "APProposer.run() is not yet implemented. "
-            "Candidate JE construction lands in Step 55."
+    def __init__(self, tenant, context=None, *, proposer=None):
+        """
+        Args:
+            tenant:   The Tenant instance (passed to DepartmentSpecialist).
+            context:  Optional context dict.
+            proposer: Injectable builder for testing.  When None, a
+                      :class:`~agents.ap.proposer.SyscohadaBillProposer` is used.
+        """
+        super().__init__(tenant, context)
+        if proposer is None:
+            from agents.ap.proposer import SyscohadaBillProposer
+            proposer = SyscohadaBillProposer()
+        self._proposer = proposer
+
+    def run(self, input_data: dict) -> SpecialistResult:
+        """Build the candidate SYSCOHADA journal entry.
+
+        Returns SpecialistResult(ok=True, output={...}) on success.
+        Returns SpecialistResult(ok=False, error=...) on any failure — never raises.
+        """
+        from agents.ap.proposer import ProposerError
+
+        try:
+            output = self._proposer.build(input_data, self.tenant)
+        except ProposerError as exc:
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Proposal failed: {exc}",
+            )
+        except Exception as exc:  # noqa: BLE001 — pipeline must not crash
+            return SpecialistResult(
+                specialist_type=self.specialist_type,
+                output={},
+                ok=False,
+                error=f"Unexpected proposer error: {type(exc).__name__}: {exc}",
+            )
+
+        return SpecialistResult(
+            specialist_type=self.specialist_type,
+            output=output,
+            ok=True,
         )
 
 
@@ -307,12 +357,12 @@ class APManager(DepartmentManager):
 
         APExtractor  — extract structured fields from raw document  (Step 53 ✓)
         APClassifier — suggest SYSCOHADA account codes per line     (Step 54 ✓)
-        APProposer   — build candidate journal entry                (Step 55)
+        APProposer   — build candidate journal entry                (Step 55 ✓)
         APReviewer   — adversarial citation check against K10/K12  (Step 56)
 
     ``stop_on_failure=True`` means the pipeline halts at the first failing
-    specialist.  APExtractor and APClassifier are implemented; APProposer and
-    APReviewer are still stubs (Steps 55–56).
+    specialist.  APExtractor, APClassifier and APProposer are implemented;
+    APReviewer is still a stub (Step 56).
 
     Once all specialists are implemented the pipeline runs end-to-end
     without any changes to this class.

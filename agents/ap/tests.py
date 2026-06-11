@@ -104,10 +104,6 @@ class APSpecialistHierarchyTests(TestCase):
         with self.assertRaises(NotImplementedError):
             APReviewer(_FakeTenant()).run({})
 
-    def test_proposer_run_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            APProposer(_FakeTenant()).run({})
-
 
 # ---------------------------------------------------------------------------
 # APManager pipeline wiring tests (pure-unit, no DB)
@@ -788,3 +784,195 @@ class AnthropicLineClassifierTests(TestCase):
         self.assertEqual(len(merged), 2)
         self.assertEqual(merged[1]["confidence"], "low")
         self.assertEqual(merged[1]["suggested_account"], "")
+
+
+# ---------------------------------------------------------------------------
+# APProposer.run() — Step 55 candidate journal-entry builder
+# ---------------------------------------------------------------------------
+
+def _proposer_context(**overrides):
+    """A realistic merged extractor+classifier context for the proposer."""
+    ctx = {
+        "vendor_name": "MTN Cameroon",
+        "vendor_vat": "M021500001234X",
+        "invoice_date": "2026-03-15",
+        "invoice_number": "FAC-2026-0042",
+        "currency": "XAF",
+        "subtotal": 70000,
+        "tax_amount": 13475,
+        "total": 83475,
+        "classified_lines": [
+            {"description": "Telephone charges", "amount": 50000,
+             "suggested_account": "628100", "suggested_account_name": "Telephone charges",
+             "confidence": "high"},
+            {"description": "Office supplies", "amount": 20000,
+             "suggested_account": "604100", "suggested_account_name": "Consumables",
+             "confidence": "medium"},
+        ],
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+class APProposerTests(TestCase):
+    """APProposer.run() builds a balanced SYSCOHADA vendor-bill JE from context."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant, Account, Journal
+
+        cls.currency = Currency.objects.create(
+            code="XAF_55", name="CFA Franc (Step 55)", symbol="XAF", decimal_places=0
+        )
+        cls.tenant = Tenant.objects.create(
+            name="Proposer Test Co", slug="proposer-test-co-55", currency=cls.currency
+        )
+        # Expense accounts (classifier targets)
+        Account.objects.create(tenant=cls.tenant, code="628100",
+                               name="Telephone charges", type="expense_direct_cost")
+        Account.objects.create(tenant=cls.tenant, code="604100",
+                               name="Consumables", type="expense")
+        # Supplier + VAT + suspense
+        Account.objects.create(tenant=cls.tenant, code="401100",
+                               name="Suppliers", type="payable", reconcile=True)
+        Account.objects.create(tenant=cls.tenant, code="445200",
+                               name="VAT recoverable on purchases", type="liability_current")
+        # Purchase journal
+        Journal.objects.create(tenant=cls.tenant, name="Purchases", code="ACH",
+                               type="purchase")
+
+    def _run(self, context=None):
+        return APProposer(self.tenant).run(context if context is not None else _proposer_context())
+
+    # --- happy path ---------------------------------------------------------
+
+    def test_run_ok_true(self):
+        self.assertTrue(self._run().ok)
+
+    def test_proposed_je_present(self):
+        out = self._run().output
+        self.assertIn("proposed_je", out)
+        self.assertIn("lines", out["proposed_je"])
+
+    def test_entry_is_balanced(self):
+        out = self._run().output
+        self.assertTrue(out["balanced"])
+        self.assertEqual(out["debit_total"], out["credit_total"])
+
+    def test_expense_debits_and_vat_and_supplier_credit(self):
+        lines = self._run().output["proposed_je"]["lines"]
+        # 2 expense debits + 1 VAT debit + 1 supplier credit
+        self.assertEqual(len(lines), 4)
+        accounts = [ln["account"] for ln in lines]
+        self.assertEqual(accounts, ["628100", "604100", "445200", "401100"])
+
+    def test_debit_total_equals_sum_of_lines_plus_vat(self):
+        out = self._run().output
+        # 50000 + 20000 expenses + 13475 VAT = 83475
+        self.assertEqual(out["debit_total"], "83475.00")
+
+    def test_supplier_credit_is_total_ttc(self):
+        lines = self._run().output["proposed_je"]["lines"]
+        supplier = lines[-1]
+        self.assertEqual(supplier["account"], "401100")
+        self.assertEqual(supplier["credit"], "83475.00")
+        self.assertEqual(supplier["debit"], "0.00")
+        self.assertEqual(supplier["partner_vat"], "M021500001234X")
+
+    def test_total_matches_extracted(self):
+        out = self._run().output
+        self.assertTrue(out["total_matches"])
+        self.assertFalse(out["needs_review"])
+        self.assertEqual(out["issues"], [])
+
+    def test_je_header_fields(self):
+        je = self._run().output["proposed_je"]
+        self.assertEqual(je["date"], "2026-03-15")
+        self.assertEqual(je["ref"], "FAC-2026-0042")
+        self.assertEqual(je["journal_code"], "ACH")
+
+    # --- VAT handling -------------------------------------------------------
+
+    def test_no_tax_means_no_vat_line(self):
+        ctx = _proposer_context(tax_amount=0, total=70000)
+        lines = self._run(ctx).output["proposed_je"]["lines"]
+        accounts = [ln["account"] for ln in lines]
+        self.assertNotIn("445200", accounts)
+        self.assertEqual(len(lines), 3)  # 2 expenses + supplier
+
+    # --- discrepancy surfacing ---------------------------------------------
+
+    def test_total_mismatch_flags_issue_but_stays_balanced(self):
+        # Stated total (99999) does not equal expenses+VAT (83475)
+        ctx = _proposer_context(total=99999)
+        out = self._run(ctx).output
+        self.assertTrue(out["balanced"])          # entry still balances internally
+        self.assertFalse(out["total_matches"])
+        self.assertTrue(out["needs_review"])
+        self.assertTrue(any("differs" in m for m in out["issues"]))
+
+    def test_low_confidence_line_sets_needs_review(self):
+        ctx = _proposer_context()
+        ctx["classified_lines"][1]["confidence"] = "low"
+        out = self._run(ctx).output
+        self.assertTrue(out["needs_review"])
+
+    def test_unknown_account_line_is_skipped_with_issue(self):
+        ctx = _proposer_context()
+        ctx["classified_lines"][1]["suggested_account"] = "999999"  # not in chart
+        out = self._run(ctx).output
+        accounts = [ln["account"] for ln in out["proposed_je"]["lines"]]
+        self.assertNotIn("999999", accounts)
+        self.assertTrue(any("not in the tenant" in m for m in out["issues"]))
+        self.assertTrue(out["needs_review"])
+
+    def test_line_missing_account_is_skipped(self):
+        ctx = _proposer_context()
+        ctx["classified_lines"][1]["suggested_account"] = ""
+        out = self._run(ctx).output
+        self.assertTrue(any("no account suggested" in m for m in out["issues"]))
+
+    # --- hard failures → ok=False (never raises) ---------------------------
+
+    def test_no_lines_returns_ok_false(self):
+        ctx = _proposer_context(classified_lines=[])
+        result = self._run(ctx)
+        self.assertFalse(result.ok)
+        self.assertIn("no classified line items", result.error)
+
+    def test_all_lines_unusable_returns_ok_false(self):
+        ctx = _proposer_context()
+        for ln in ctx["classified_lines"]:
+            ln["suggested_account"] = ""
+        result = self._run(ctx)
+        self.assertFalse(result.ok)
+
+    def test_no_supplier_account_returns_ok_false(self):
+        from accounting.models import Currency, Tenant, Account, Journal
+        cur = Currency.objects.create(code="XAF_55b", name="x", symbol="X", decimal_places=0)
+        bare = Tenant.objects.create(name="Bare", slug="bare-55b", currency=cur)
+        Account.objects.create(tenant=bare, code="628100", name="Tel", type="expense")
+        result = APProposer(bare).run(_proposer_context())
+        self.assertFalse(result.ok)
+        self.assertIn("supplier", result.error.lower())
+
+
+class SyscohadaBillProposerUnitTests(TestCase):
+    """Unit tests for the pure money/parse helpers in agents.ap.proposer."""
+
+    def test_to_decimal_parses_numbers_and_strings(self):
+        from agents.ap.proposer import _to_decimal
+        from decimal import Decimal
+        self.assertEqual(_to_decimal(1000), Decimal("1000"))
+        self.assertEqual(_to_decimal("2500.50"), Decimal("2500.50"))
+
+    def test_to_decimal_returns_none_for_blank_or_bad(self):
+        from agents.ap.proposer import _to_decimal
+        self.assertIsNone(_to_decimal(None))
+        self.assertIsNone(_to_decimal(""))
+        self.assertIsNone(_to_decimal("not-a-number"))
+
+    def test_money_renders_two_decimals(self):
+        from agents.ap.proposer import _money
+        from decimal import Decimal
+        self.assertEqual(_money(Decimal("83475")), "83475.00")

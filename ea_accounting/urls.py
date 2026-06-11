@@ -10,6 +10,8 @@ from accounting.views import (
     agent_activity,
     ap_email_webhook,
     ap_inbox,
+    ap_queue,
+    ap_queue_detail,
     approver_assignment,
     capability_matrix,
     chain_detail,
@@ -49,6 +51,9 @@ urlpatterns = [
     # D01 AP dept inbox + email webhook (Step 52)
     path('ap/inbox/', ap_inbox, name='ap_inbox'),
     path('ap/webhook/email/', ap_email_webhook, name='ap_email_webhook'),
+    # D01 AP approval queue — one-click approve / reject (Step 57)
+    path('ap/queue/', ap_queue, name='ap_queue'),
+    path('ap/queue/<int:pk>/', ap_queue_detail, name='ap_queue_detail'),
     # Platform pages — the virtual-finance-function vision (read-only skeletons
     # today; the agents fill them from Phase P03/P05+). The accounting data
     # layer itself is reached via the Django admin ("Ledger").

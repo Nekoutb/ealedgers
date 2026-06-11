@@ -1,11 +1,15 @@
-"""Tests for the D01 AP department — Steps 51, 53, and 54.
+"""Tests for the D01 AP department — Steps 51 and 53–56.
 
 Coverage:
-  - Specialist hierarchy (subclasses, specialist_type, stubs raise NotImplementedError)
+  - Specialist hierarchy (subclasses, specialist_type, implemented behaviours)
   - APExtractor.run() — Step 53 LLM extraction logic (mocked Anthropic client)
   - AnthropicBillExtractor unit tests (content block builder, response parser)
   - APClassifier.run() — Step 54 SYSCOHADA account classification (mocked client)
   - AnthropicLineClassifier unit tests (account loading, response parser, merge)
+  - APProposer.run() — Step 55 candidate-JE builder (balanced entry, VAT,
+    issue surfacing, ok=False hard failures) + money/parse helper units
+  - APReviewer.run() — Step 56 adversarial citation check (approve/reject,
+    anti-hallucination guard, structural pre-checks, ok=False infra failures)
   - APManager pipeline wiring (order, stop_on_failure, run-to-first-failure)
   - APDepartment class attributes (dept_code, dept_name, capabilities_needed)
   - APDepartment.handle() subscription gate (DepartmentDisabledError when disabled)
@@ -100,9 +104,11 @@ class APSpecialistHierarchyTests(TestCase):
         result = APClassifier(_FakeTenant()).run({})
         self.assertTrue(result.ok)
 
-    def test_reviewer_run_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            APReviewer(_FakeTenant()).run({})
+    def test_reviewer_run_rejects_when_no_proposed_je(self):
+        """APReviewer.run() no longer raises — missing entry is a rejection."""
+        result = APReviewer(_FakeTenant()).run({})
+        self.assertTrue(result.ok)
+        self.assertFalse(result.output["approved"])
 
 
 # ---------------------------------------------------------------------------
@@ -976,3 +982,309 @@ class SyscohadaBillProposerUnitTests(TestCase):
         from agents.ap.proposer import _money
         from decimal import Decimal
         self.assertEqual(_money(Decimal("83475")), "83475.00")
+
+
+# ---------------------------------------------------------------------------
+# APReviewer.run() — Step 56 adversarial citation check
+# ---------------------------------------------------------------------------
+
+def _make_review_mock_client(verdict="approve", citations=None, review_notes="Looks compliant."):
+    """Return a mock Anthropic client whose response is a review_journal_entry tool_use."""
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.name = "review_journal_entry"
+    tool_block.input = {
+        "verdict": verdict,
+        "citations": citations if citations is not None else [],
+        "review_notes": review_notes,
+    }
+    mock_response = MagicMock()
+    mock_response.content = [tool_block]
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+    return mock_client
+
+
+def _reviewer_context(**overrides):
+    """A realistic merged pipeline context as it reaches the reviewer."""
+    ctx = {
+        "vendor_name": "MTN Cameroon",
+        "vendor_vat": "M021500001234X",
+        "currency": "XAF",
+        "total": 83475,
+        "tax_amount": 13475,
+        "classified_lines": [
+            {"description": "Telephone charges", "amount": 50000,
+             "suggested_account": "628100", "confidence": "high"},
+        ],
+        "issues": [],
+        "proposed_je": {
+            "date": "2026-03-15",
+            "ref": "FAC-2026-0042",
+            "journal_code": "ACH",
+            "lines": [
+                {"account": "628100", "label": "Telephone charges",
+                 "debit": "70000.00", "credit": "0.00", "partner_vat": ""},
+                {"account": "445200", "label": "TVA récupérable",
+                 "debit": "13475.00", "credit": "0.00", "partner_vat": ""},
+                {"account": "401100", "label": "MTN Cameroon",
+                 "debit": "0.00", "credit": "83475.00",
+                 "partner_vat": "M021500001234X"},
+            ],
+        },
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+class _FakeRuleObj:
+    """Bare object carrying the source_text attr _format_rules reads."""
+
+    def __init__(self, source_text):
+        self.source_text = source_text
+
+
+def _fake_retrieved():
+    """Deterministic stand-in for knowledge.retrieval.retrieve() results."""
+    return [
+        {
+            "kind": "rule",
+            "slug": "test-cgi-telephone-charges",
+            "title": "Telephone charges deductible",
+            "framework": "CGI-2025",
+            "score": 9,
+            "source_ref": "CGI 2025 art. 7-A",
+            "object": _FakeRuleObj(
+                "Telephone charges are deductible when incurred for business."),
+        },
+        {
+            "kind": "rule",
+            "slug": "test-cgi-tva-recoverable",
+            "title": "TVA recoverable on vendor bill purchases",
+            "framework": "CGI-2025",
+            "score": 7,
+            "source_ref": "CGI 2025 art. 132",
+            "object": _FakeRuleObj(
+                "TVA on purchases is recoverable when a compliant invoice exists."),
+        },
+    ]
+
+
+class APReviewerTests(TestCase):
+    """APReviewer.run() with a mocked Anthropic client and patched retrieval.
+
+    Retrieval is patched (rather than seeding Rule rows) so ranking against
+    the ~100 framework rules the data migrations load into the test DB can
+    never make these tests flaky.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant
+
+        cls.currency = Currency.objects.create(
+            code="XAF_56", name="CFA Franc (Step 56)", symbol="XAF", decimal_places=0
+        )
+        cls.tenant = Tenant.objects.create(
+            name="Reviewer Test Co", slug="reviewer-test-co-56", currency=cls.currency
+        )
+
+    def _run(self, context=None, *, verdict="approve", citations=None, notes="ok",
+             retrieved=None):
+        from unittest.mock import patch
+        client = _make_review_mock_client(verdict=verdict, citations=citations, review_notes=notes)
+        reviewer = APReviewer(self.tenant, reviewer_client=client, reviewer_model="test-model")
+        with patch(
+            "agents.ap.reviewer._retrieve_rules",
+            return_value=_fake_retrieved() if retrieved is None else retrieved,
+        ):
+            result = reviewer.run(context if context is not None else _reviewer_context())
+        return result, client
+
+    # --- approve path --------------------------------------------------------
+
+    def test_approve_verdict_with_passing_citations(self):
+        result, _ = self._run(
+            citations=[{"rule_slug": "test-cgi-telephone-charges", "verdict": "pass",
+                        "notes": "Business telecom expense."}],
+        )
+        self.assertTrue(result.ok)
+        self.assertTrue(result.output["approved"])
+
+    def test_output_has_required_keys(self):
+        result, _ = self._run()
+        for key in ("approved", "citations", "review_notes", "structural_issues"):
+            self.assertIn(key, result.output)
+
+    def test_citation_source_ref_comes_from_database(self):
+        """source_ref is re-read from the Rule row, not taken from the model."""
+        result, _ = self._run(
+            citations=[{"rule_slug": "test-cgi-telephone-charges", "verdict": "pass",
+                        "notes": "x"}],
+        )
+        cite = result.output["citations"][0]
+        self.assertEqual(cite["source_ref"], "CGI 2025 art. 7-A")
+
+    # --- reject paths ---------------------------------------------------------
+
+    def test_reject_verdict_is_ok_true_approved_false(self):
+        result, _ = self._run(verdict="reject", notes="Violates deductibility cap.")
+        self.assertTrue(result.ok)
+        self.assertFalse(result.output["approved"])
+        self.assertIn("Violates", result.output["review_notes"])
+
+    def test_fail_citation_overrides_approve_verdict(self):
+        """Even if the model says approve, a 'fail' citation forces rejection."""
+        result, _ = self._run(
+            verdict="approve",
+            citations=[{"rule_slug": "test-cgi-tva-recoverable", "verdict": "fail",
+                        "notes": "No compliant invoice."}],
+        )
+        self.assertFalse(result.output["approved"])
+
+    # --- anti-hallucination guard ---------------------------------------------
+
+    def test_unknown_rule_slug_citation_is_dropped(self):
+        result, _ = self._run(
+            citations=[
+                {"rule_slug": "invented-rule-slug", "verdict": "fail", "notes": "fake"},
+                {"rule_slug": "test-cgi-telephone-charges", "verdict": "pass", "notes": "real"},
+            ],
+        )
+        slugs = [c["rule_slug"] for c in result.output["citations"]]
+        self.assertEqual(slugs, ["test-cgi-telephone-charges"])
+        self.assertIn("anti-hallucination", result.output["review_notes"])
+
+    def test_dropped_fail_citation_does_not_block_approval(self):
+        """A hallucinated 'fail' must not reject the entry once discarded."""
+        result, _ = self._run(
+            citations=[{"rule_slug": "invented-rule-slug", "verdict": "fail", "notes": "fake"}],
+        )
+        self.assertTrue(result.output["approved"])
+
+    # --- structural rejection (no API call) ------------------------------------
+
+    def test_unbalanced_entry_rejected_without_api_call(self):
+        ctx = _reviewer_context()
+        ctx["proposed_je"]["lines"][0]["debit"] = "999999.00"
+        result, client = self._run(ctx)
+        self.assertTrue(result.ok)
+        self.assertFalse(result.output["approved"])
+        self.assertTrue(result.output["structural_issues"])
+        client.messages.create.assert_not_called()
+
+    def test_missing_proposed_je_rejected(self):
+        result, client = self._run({"vendor_name": "X"})
+        self.assertFalse(result.output["approved"])
+        client.messages.create.assert_not_called()
+
+    # --- no relevant rules → conservative reject -------------------------------
+
+    def test_no_retrieved_rules_means_could_not_verify(self):
+        result, client = self._run(retrieved=[])
+        self.assertTrue(result.ok)
+        self.assertFalse(result.output["approved"])
+        self.assertIn("Manual review required", result.output["review_notes"])
+        client.messages.create.assert_not_called()
+
+    # --- reviewer infrastructure failures → ok=False ----------------------------
+
+    def test_api_error_returns_ok_false(self):
+        from unittest.mock import patch
+        client = MagicMock()
+        client.messages.create.side_effect = RuntimeError("connection reset")
+        reviewer = APReviewer(self.tenant, reviewer_client=client, reviewer_model="test-model")
+        with patch("agents.ap.reviewer._retrieve_rules", return_value=_fake_retrieved()):
+            result = reviewer.run(_reviewer_context())
+        self.assertFalse(result.ok)
+        self.assertIn("Review failed", result.error)
+
+    def test_no_tool_use_block_returns_ok_false(self):
+        from unittest.mock import patch
+        text_block = MagicMock()
+        text_block.type = "text"
+        response = MagicMock()
+        response.content = [text_block]
+        response.stop_reason = "end_turn"
+        client = MagicMock()
+        client.messages.create.return_value = response
+        reviewer = APReviewer(self.tenant, reviewer_client=client, reviewer_model="test-model")
+        with patch("agents.ap.reviewer._retrieve_rules", return_value=_fake_retrieved()):
+            result = reviewer.run(_reviewer_context())
+        self.assertFalse(result.ok)
+
+    # --- retrieval integration (real retrieve() against migration-loaded rules)
+
+    def test_real_retrieval_returns_results_for_bill_query(self):
+        """Integration: the real knowledge base yields candidate rules for a
+        typical vendor-bill query (the data migrations load ~100 rules)."""
+        from agents.ap.reviewer import _retrieve_rules
+        retrieved = _retrieve_rules(_reviewer_context(), self.tenant)
+        self.assertTrue(retrieved)
+        self.assertTrue(all("slug" in r and "source_ref" in r for r in retrieved))
+
+
+class ReviewerStructuralChecksTests(TestCase):
+    """Unit tests for agents.ap.reviewer.structural_issues (pure, no DB)."""
+
+    def _je(self, lines, date="2026-03-15"):
+        return {"date": date, "ref": "X", "journal_code": "ACH", "lines": lines}
+
+    def test_sound_entry_has_no_issues(self):
+        je = self._je([
+            {"account": "628100", "debit": "100.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "100.00"},
+        ])
+        from agents.ap.reviewer import structural_issues
+        self.assertEqual(structural_issues(je), [])
+
+    def test_empty_lines_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        self.assertEqual(structural_issues(self._je([])), ["The proposed entry has no lines."])
+
+    def test_unbalanced_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "628100", "debit": "100.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "90.00"},
+        ]))
+        self.assertTrue(any("unbalanced" in i for i in issues))
+
+    def test_negative_amount_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "628100", "debit": "-100.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "-100.00"},
+        ]))
+        self.assertTrue(any("negative" in i for i in issues))
+
+    def test_double_sided_line_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "628100", "debit": "100.00", "credit": "100.00"},
+        ]))
+        self.assertTrue(any("both a debit and a credit" in i for i in issues))
+
+    def test_missing_account_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "", "debit": "100.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "100.00"},
+        ]))
+        self.assertTrue(any("no account code" in i for i in issues))
+
+    def test_zero_total_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "628100", "debit": "0.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "0.00"},
+        ]))
+        self.assertTrue(any("zero" in i for i in issues))
+
+    def test_missing_date_flagged(self):
+        from agents.ap.reviewer import structural_issues
+        issues = structural_issues(self._je([
+            {"account": "628100", "debit": "100.00", "credit": "0.00"},
+            {"account": "401100", "debit": "0.00", "credit": "100.00"},
+        ], date=""))
+        self.assertTrue(any("no date" in i for i in issues))

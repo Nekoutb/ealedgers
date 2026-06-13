@@ -17,6 +17,7 @@ LLM/OCR integrations status:
   - Step 55 — APProposer (SYSCOHADA JE builder)           ✓ done (agents/ap/proposer.py)
   - Step 56 — APReviewer (adversarial citation check)     ✓ done (agents/ap/reviewer.py)
   - Step 58 — APDepartment.execute() (ERP CAP.05 + CAP.03) ✓ done (this file)
+  - Step 59 — AP emits ``bill.posted`` event on a successful post ✓ done
   - Step 58 — APDepartment.execute() (CAP.05 + CAP.03)   stub → Step 58
   - Step 60 — auto-approval rule engine                   stub → Step 60
 
@@ -536,7 +537,9 @@ class APDepartment(BaseDepartment):
 
         Raises ``ValueError`` when the proposal carries no journal entry, and
         ``ConnectorExecutionError`` when the ERP write fails or escalates.
-        The ``bill.posted`` event is emitted by the caller in Step 59.
+        On success a ``bill.posted`` event is emitted (Step 59) so downstream
+        departments can react; the saved BusEvent id is returned as
+        ``event_id`` (``None`` if emission failed — the post still succeeded).
         """
         proposed_je = self._extract_proposed_je(proposal)
         je_lines = proposed_je.get("lines") or []
@@ -574,7 +577,7 @@ class APDepartment(BaseDepartment):
             result = call() or {}
             operation_id = None
 
-        return {
+        outcome_dict = {
             "posted": True,
             "capability": capability,
             "connector": getattr(connector, "vendor", type(connector).__name__),
@@ -583,6 +586,54 @@ class APDepartment(BaseDepartment):
             "operation_id": operation_id,
             "result": result,
         }
+
+        # Announce the post so downstream departments (D06 Tax, D04 Fixed
+        # Assets, D03 Treasury) can react (Step 59). Best-effort: the bill is
+        # already in the ledger, so a failure to emit must NOT fail execute().
+        try:
+            bus_event = self._emit_bill_posted(proposal, proposed_je, outcome_dict)
+            outcome_dict["event_id"] = bus_event.id
+        except Exception:  # noqa: BLE001 — emission is best-effort
+            outcome_dict["event_id"] = None
+
+        return outcome_dict
+
+    def _emit_bill_posted(self, proposal: Proposal, proposed_je: dict, result: dict):
+        """Emit the ``bill.posted`` BusEvent for a successful post (Step 59).
+
+        Threads the proposal's ``chain_id`` so the event joins the same causal
+        chain as the originating ``bill.received`` event and the proposal
+        (Steps 44 + 50).  Returns the saved BusEvent.
+        """
+        from agents.events import Event, emit
+
+        extractor = next(
+            (r.output for r in proposal.specialist_results
+             if r.specialist_type == "extractor" and r.ok),
+            {},
+        )
+        inputs = proposal.inputs or {}
+        payload = {
+            "dept_code": self.dept_code,
+            "external_id": result.get("external_id"),
+            "capability": result.get("capability"),
+            "connector": result.get("connector"),
+            "state": result.get("state"),
+            "operation_id": result.get("operation_id"),
+            "ref": proposed_je.get("ref", ""),
+            "journal_code": proposed_je.get("journal_code", ""),
+            "vendor_name": extractor.get("vendor_name", ""),
+            "vendor_vat": extractor.get("vendor_vat", ""),
+            "total": extractor.get("total"),
+            "currency": extractor.get("currency", ""),
+            "ap_document_id": inputs.get("ap_document_id") or inputs.get("document_id"),
+        }
+        return emit(Event(
+            event_type="bill.posted",
+            tenant=self.tenant,
+            payload=payload,
+            chain_id=proposal.chain_id,
+        ))
 
     # ----- execution helpers --------------------------------------------------
 

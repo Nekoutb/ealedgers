@@ -13,4 +13,5 @@ from agents.ap.department import (  # noqa: F401
     APManager,
     APProposer,
     APReviewer,
+    ConnectorExecutionError,
 )

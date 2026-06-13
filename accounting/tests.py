@@ -3829,3 +3829,91 @@ class APQueueViewTests(TestCase):
         r = self.client.get(f"/ap/queue/{item.pk}/")
         self.assertContains(r, "Not deductible.")
         self.assertNotContains(r, 'name="action" value="approve"')  # no decision form
+
+
+# ---------------------------------------------------------------------------
+# Step 58 — AP queue "Post to ERP" action (execute approved item)
+# ---------------------------------------------------------------------------
+
+class APQueuePostActionTests(TestCase):
+    """The /ap/queue/<pk>/ POST action='post' executes an approved item."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Account, Journal
+        cls.currency = Currency.objects.create(
+            code="XAF_58v", name="CFA (58v)", symbol="XAF", decimal_places=0)
+        cls.tenant = _make_tenant("ap58v", currency=cls.currency)
+        cls.user = get_user_model().objects.create_user("ap58vuser", password="pw")
+        Membership.objects.create(user=cls.user, tenant=cls.tenant, role="owner")
+        for code, name, typ in [
+            ("628100", "Telephone", "expense_direct_cost"),
+            ("445200", "VAT recoverable", "liability_current"),
+            ("401100", "Suppliers", "payable"),
+        ]:
+            Account.objects.create(tenant=cls.tenant, code=code, name=name, type=typ)
+        Journal.objects.create(tenant=cls.tenant, name="Purchases", code="ACH",
+                               type="purchase")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _approved_item(self, journal="ACH"):
+        return ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code="D01", action="Post vendor bill",
+            inputs={}, chain_id="chain-58v", status="approved",
+            specialist_results=[{
+                "specialist_type": "proposer", "ok": True, "error": "",
+                "output": {"proposed_je": {
+                    "date": "2026-03-15", "ref": "F-1", "journal_code": journal,
+                    "lines": [
+                        {"account": "628100", "label": "Telephone",
+                         "debit": "70000.00", "credit": "0.00", "partner_vat": ""},
+                        {"account": "445200", "label": "TVA",
+                         "debit": "13475.00", "credit": "0.00", "partner_vat": ""},
+                        {"account": "401100", "label": "MTN Cameroon",
+                         "debit": "0.00", "credit": "83475.00", "partner_vat": "M0215X"},
+                    ]}}}],
+        )
+
+    def test_post_action_executes_and_marks_executed(self):
+        from accounting.models import JournalEntry
+        item = self._approved_item()
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "post"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("done=posted", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "executed")
+        self.assertTrue(item.metadata["execution"]["external_id"])
+        self.assertEqual(JournalEntry.objects.filter(tenant=self.tenant).count(), 1)
+
+    def test_post_action_on_pending_item_is_noop(self):
+        item = ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code="D01", action="x", inputs={},
+            status="pending", specialist_results=[])
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "post"})
+        self.assertIn("done=already", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "pending")
+
+    def test_post_action_failure_marks_execution_failed(self):
+        # journal 'NOPE' doesn't exist → LocalGL raises ValueError → post_failed
+        item = self._approved_item(journal="NOPE")
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "post"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("done=post_failed", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "execution_failed")
+
+    def test_detail_shows_post_button_for_approved(self):
+        item = self._approved_item()
+        r = self.client.get(f"/ap/queue/{item.pk}/")
+        self.assertContains(r, 'name="action" value="post"')
+
+    def test_detail_executed_shows_external_id(self):
+        item = self._approved_item()
+        self.client.post(f"/ap/queue/{item.pk}/", {"action": "post"})
+        item.refresh_from_db()
+        r = self.client.get(f"/ap/queue/{item.pk}/")
+        self.assertContains(r, "Posted to")
+        self.assertNotContains(r, 'name="action" value="post"')  # no longer postable

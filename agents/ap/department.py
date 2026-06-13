@@ -16,6 +16,7 @@ LLM/OCR integrations status:
   - Step 54 — APClassifier (account-code suggestion)      ✓ done
   - Step 55 — APProposer (SYSCOHADA JE builder)           ✓ done (agents/ap/proposer.py)
   - Step 56 — APReviewer (adversarial citation check)     ✓ done (agents/ap/reviewer.py)
+  - Step 58 — APDepartment.execute() (ERP CAP.05 + CAP.03) ✓ done (this file)
   - Step 58 — APDepartment.execute() (CAP.05 + CAP.03)   stub → Step 58
   - Step 60 — auto-approval rule engine                   stub → Step 60
 
@@ -37,6 +38,14 @@ from agents.department import (
     Proposal,
     SpecialistResult,
 )
+
+
+class ConnectorExecutionError(Exception):
+    """Raised when posting an approved AP proposal to the ERP fails (Step 58).
+
+    Distinct from validation errors (``ValueError``): the proposal was sound
+    but the ERP write itself failed or escalated after retries.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -507,16 +516,191 @@ class APDepartment(BaseDepartment):
     def execute(self, proposal: Proposal) -> dict:
         """Execute an APPROVED AP proposal — post the vendor bill to the ERP.
 
-        Delegates to:
-          - CAP.05 (vendor-bill create in Odoo / local GL)
-          - CAP.03 (post the resulting journal entry)
+        Posting strategy (Step 58):
+          - **CAP.05** (create/post a vendor-bill object) is used when the
+            tenant's connector advertises it.
+          - Otherwise the balanced journal entry the proposer built is posted
+            directly via **CAP.03** — the documented "manual-JE-via-CAP.03"
+            gap-fallback (decision P00.10).  This is the live path today, since
+            neither the Odoo nor the local-GL connector implements CAP.05 yet.
 
-        Emits a ``bill.posted`` BusEvent for downstream consumers (D06 Tax,
-        D04 Fixed Assets, D03 Treasury) — Steps 58–59 implement this.
+        The write is wrapped in the saga (:func:`accounting.saga.run_erp_operation`)
+        when a real ERP connection exists, so it gets retry/backoff + an
+        ``ERPOperation`` audit row; standalone (local-GL) tenants post directly
+        against their own ledger.
 
-        Raises ``NotImplementedError`` until Step 58.
+        Returns a result dict::
+
+            {posted, capability, connector, external_id, state,
+             operation_id, result}
+
+        Raises ``ValueError`` when the proposal carries no journal entry, and
+        ``ConnectorExecutionError`` when the ERP write fails or escalates.
+        The ``bill.posted`` event is emitted by the caller in Step 59.
         """
-        raise NotImplementedError(
-            "APDepartment.execute() is not yet implemented. "
-            "ERP execution (CAP.05 + CAP.03) lands in Step 58."
+        proposed_je = self._extract_proposed_je(proposal)
+        je_lines = proposed_je.get("lines") or []
+        if not je_lines:
+            raise ValueError("Cannot execute: the proposal has no journal-entry lines.")
+
+        connector_lines = [self._to_connector_line(ln) for ln in je_lines]
+        connector = self.connector
+        capability, call = self._build_post_call(connector, proposed_je, connector_lines)
+        connection = self._active_connection()
+
+        if connection is not None:
+            from accounting.saga import run_erp_operation
+            outcome = run_erp_operation(
+                connection=connection,
+                capability=capability,
+                func=call,
+                method="post_journal_entry",
+                tenant=self.tenant,
+                request={
+                    "ref": proposed_je.get("ref", ""),
+                    "journal_code": proposed_je.get("journal_code", ""),
+                    "line_count": len(connector_lines),
+                },
+            )
+            if not outcome.ok:
+                kind = "escalated" if outcome.escalated else "failed"
+                raise ConnectorExecutionError(
+                    f"ERP post {kind} after {outcome.attempts} attempt(s): "
+                    f"{outcome.operation.error}"
+                )
+            result = outcome.result or {}
+            operation_id = outcome.operation.id
+        else:
+            result = call() or {}
+            operation_id = None
+
+        return {
+            "posted": True,
+            "capability": capability,
+            "connector": getattr(connector, "vendor", type(connector).__name__),
+            "external_id": result.get("external_id"),
+            "state": result.get("state"),
+            "operation_id": operation_id,
+            "result": result,
+        }
+
+    # ----- execution helpers --------------------------------------------------
+
+    @staticmethod
+    def _extract_proposed_je(proposal: Proposal) -> dict:
+        """Pull the proposer's ``proposed_je`` out of a Proposal's results."""
+        for r in proposal.specialist_results:
+            if r.specialist_type == "proposer" and r.ok:
+                return (r.output or {}).get("proposed_je") or {}
+        raise ValueError(
+            "Cannot execute: the proposal has no successful proposer output."
+        )
+
+    @staticmethod
+    def _to_connector_line(line: dict) -> dict:
+        """Map a proposed-JE line to the connector's line schema.
+
+        Proposer line keys (``account``/``label``) → connector keys
+        (``account_code``/``name``); debit/credit pass through as strings
+        (both connectors cast them).
+        """
+        return {
+            "account_code": line.get("account"),
+            "name": line.get("label") or "",
+            "debit": line.get("debit") or "0",
+            "credit": line.get("credit") or "0",
+            "partner_vat": line.get("partner_vat") or "",
+        }
+
+    def _build_post_call(self, connector, proposed_je: dict, connector_lines: list):
+        """Return ``(capability, zero_arg_callable)`` for posting the bill.
+
+        Prefers CAP.05 (a richer vendor-bill object) when the connector
+        supports it; otherwise posts the balanced JE via CAP.03.
+        """
+        date = proposed_je.get("date") or None
+        ref = proposed_je.get("ref", "")
+        journal_code = proposed_je.get("journal_code") or None
+
+        if connector.supports("CAP.05"):
+            def _call():
+                return connector.execute(
+                    "CAP.05", lines=connector_lines, date=date, ref=ref,
+                    journal_code=journal_code, post=True,
+                )
+            return "CAP.05", _call
+
+        def _call():
+            return connector.post_journal_entry(
+                lines=connector_lines, date=date, ref=ref,
+                journal_code=journal_code, post=True,
+            )
+        return "CAP.03", _call
+
+    def _active_connection(self):
+        """The tenant's active, non-manual ERP connection (or None = standalone)."""
+        from accounting.models import ERPConnection
+        return (
+            ERPConnection.objects
+            .filter(tenant=self.tenant, is_active=True)
+            .exclude(vendor="manual")
+            .order_by("-is_primary", "name")
+            .first()
+        )
+
+    # ----- approval-queue bridge ----------------------------------------------
+
+    def execute_queue_item(self, item) -> dict:
+        """Post an APPROVED :class:`ApprovalQueueItem` to the ERP and advance it.
+
+        Rebuilds a :class:`~agents.department.Proposal` from the stored
+        specialist results, calls :meth:`execute`, then transitions the item to
+        ``executed`` (recording the ERP external id in ``metadata``) or
+        ``execution_failed`` on error.  Re-raises the failure so the caller can
+        surface it; the item's status is already persisted either way.
+        """
+        if item.status not in ("approved", "auto_approved"):
+            raise ValueError(
+                f"Only approved items can be posted; item #{item.pk} is "
+                f"'{item.status}'."
+            )
+
+        proposal = self._proposal_from_item(item)
+        try:
+            result = self.execute(proposal)
+        except Exception as exc:  # noqa: BLE001 — record + re-raise
+            item.mark_execution_failed(f"{type(exc).__name__}: {exc}")
+            raise
+
+        item.metadata = {
+            **(item.metadata or {}),
+            "execution": {
+                "external_id": result.get("external_id"),
+                "capability": result.get("capability"),
+                "connector": result.get("connector"),
+                "operation_id": result.get("operation_id"),
+            },
+        }
+        item.save(update_fields=["metadata"])
+        item.mark_executed()
+        return result
+
+    def _proposal_from_item(self, item) -> Proposal:
+        """Reconstruct a Proposal from an ApprovalQueueItem's stored results."""
+        results = [
+            SpecialistResult(
+                specialist_type=r.get("specialist_type", ""),
+                output=r.get("output") or {},
+                ok=bool(r.get("ok")),
+                error=r.get("error", ""),
+            )
+            for r in (item.specialist_results or [])
+        ]
+        return Proposal(
+            dept_code=item.dept_code,
+            tenant_id=self.tenant.id,
+            action=item.action,
+            inputs=item.inputs or {},
+            specialist_results=results,
+            chain_id=item.chain_id,
         )

@@ -48,11 +48,15 @@
 
   <!-- flash banner -->
   {% if done == 'approved' %}
-  <div class="apq-banner apq-banner--ok" role="status">Proposal&nbsp;#{{ ref }} approved — queued for posting.</div>
+  <div class="apq-banner apq-banner--ok" role="status">Proposal&nbsp;#{{ ref }} approved — ready to post to the ERP.</div>
+  {% elif done == 'posted' %}
+  <div class="apq-banner apq-banner--ok" role="status">Proposal&nbsp;#{{ ref }} posted to the ledger.</div>
+  {% elif done == 'post_failed' %}
+  <div class="apq-banner apq-banner--err" role="status">Proposal&nbsp;#{{ ref }} could not be posted — see its detail for the error.</div>
   {% elif done == 'rejected' %}
   <div class="apq-banner apq-banner--warn" role="status">Proposal&nbsp;#{{ ref }} rejected.</div>
   {% elif done == 'already' %}
-  <div class="apq-banner apq-banner--warn" role="status">Proposal&nbsp;#{{ ref }} had already been reviewed — no change made.</div>
+  <div class="apq-banner apq-banner--warn" role="status">Proposal&nbsp;#{{ ref }} had already been actioned — no change made.</div>
   {% endif %}
 
   <!-- pending -->
@@ -129,6 +133,7 @@
   .apq-banner { border-radius:10px; padding:.7rem 1rem; font-size:.85rem; margin-bottom:1.5rem; }
   .apq-banner--ok   { background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; }
   .apq-banner--warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
+  .apq-banner--err  { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; }
 
   .apq-section-title { font-size:.95rem; font-weight:650; letter-spacing:-.01em; color:#0a0a0a; }
   .apq-count { font-family:"Geist Mono",monospace; font-size:.72rem; background:#0a0a0a; color:#fff;

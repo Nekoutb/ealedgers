@@ -915,6 +915,17 @@ def ap_queue_detail(request, pk):
         note = request.POST.get('note', '').strip()
         queue_url = reverse('ap_queue')
 
+        # Post an APPROVED item to the ERP (CAP.05/CAP.03 — Step 58).
+        if action == 'post':
+            from agents.ap import APDepartment, ConnectorExecutionError
+            if item.status not in ('approved', 'auto_approved'):
+                return redirect(f"{queue_url}?done=already&ref={item.pk}")
+            try:
+                APDepartment(request.tenant).execute_queue_item(item)
+            except (ConnectorExecutionError, ValueError):
+                return redirect(f"{queue_url}?done=post_failed&ref={item.pk}")
+            return redirect(f"{queue_url}?done=posted&ref={item.pk}")
+
         if not item.is_pending:
             return redirect(f"{queue_url}?done=already&ref={item.pk}")
 

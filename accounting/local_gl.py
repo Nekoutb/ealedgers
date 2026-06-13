@@ -79,9 +79,11 @@ class LocalGLConnector(IConnector):
                 tenant=self.tenant, journal=journal, date=date, ref=ref,
                 state="draft")
             for ln in lines:
+                account = accounts[self._acct_key(ln)]
                 JournalEntryLine.objects.create(
                     tenant=self.tenant, entry=entry,
-                    account=accounts[self._acct_key(ln)],
+                    account=account,
+                    partner=self._partner_for_line(ln, account),
                     name=ln.get("name") or ref or "",
                     debit=Decimal(str(ln.get("debit") or 0)),
                     credit=Decimal(str(ln.get("credit") or 0)))
@@ -152,6 +154,31 @@ class LocalGLConnector(IConnector):
                 raise ValueError(
                     f"Account {val!r} not found in the local ledger.")
         return out
+
+    def _partner_for_line(self, ln, account):
+        """Resolve (get-or-create) the partner a payable/receivable line needs.
+
+        The local ledger requires a partner on AR/AP account lines. A vendor
+        bill posted through here carries the vendor on its 401x line as
+        ``partner_vat`` (tax id) + ``name``; we match an existing Partner by
+        tax id, else by name, else create one. Returns ``None`` for ordinary
+        (non-AR/AP) lines, which need no partner.
+        """
+        if account.type not in ("receivable", "payable"):
+            return None
+        from accounting.models import Partner
+        ptype = "vendor" if account.type == "payable" else "customer"
+        vat = (ln.get("partner_vat") or "").strip()
+        name = (ln.get("name") or "").strip() or "Unknown partner"
+        if vat:
+            partner, _ = Partner.objects.get_or_create(
+                tenant=self.tenant, tax_id=vat,
+                defaults={"name": name, "partner_type": ptype})
+            return partner
+        partner, _ = Partner.objects.get_or_create(
+            tenant=self.tenant, name=name,
+            defaults={"partner_type": ptype})
+        return partner
 
     def _resolve_journal(self, journal_code, journal_id):
         from accounting.models import Journal

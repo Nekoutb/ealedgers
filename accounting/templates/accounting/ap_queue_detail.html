@@ -177,6 +177,24 @@
       </div>
     </form>
   </section>
+  {% elif item.is_approved %}
+  <section class="apqd-decision">
+    <h2 class="apqd-h2 mb-1">Approved — post to ledger</h2>
+    <p class="apqd-muted mb-3">
+      Approved {% if item.reviewed_by %}by {{ item.reviewed_by.username }}{% endif %}
+      {% if item.reviewed_at %}{{ item.reviewed_at|naturaltime }}{% endif %}.
+      Posting writes the entry to {% if summary.journal_code %}journal {{ summary.journal_code }} in {% endif %}the ledger
+      via the AP connector (CAP.05/CAP.03).
+    </p>
+    {% if item.review_note %}<p class="apqd-muted mb-3">“{{ item.review_note }}”</p>{% endif %}
+    <form method="post" action="{% url 'ap_queue_detail' item.pk %}">
+      {% csrf_token %}
+      <div class="apqd-decision-actions">
+        <button type="submit" name="action" value="post" class="apqd-btn apqd-btn--approve">Post to ledger</button>
+        <a href="/ap/queue/" class="btn btn-ghost text-xs">← Back to queue</a>
+      </div>
+    </form>
+  </section>
   {% else %}
   <section class="apqd-decision apqd-decision--done">
     <p>
@@ -185,6 +203,13 @@
       {% if item.reviewed_at %}{{ item.reviewed_at|naturaltime }}{% endif %}.
     </p>
     {% if item.review_note %}<p class="apqd-muted mt-1">“{{ item.review_note }}”</p>{% endif %}
+    {% if item.metadata.execution.external_id %}
+    <p class="apqd-muted mt-1">
+      Posted to {{ item.metadata.execution.connector }} as
+      <code class="apqd-mono">#{{ item.metadata.execution.external_id }}</code>
+      via {{ item.metadata.execution.capability }}.
+    </p>
+    {% endif %}
     <a href="/ap/queue/" class="btn btn-ghost text-xs mt-3">← Back to queue</a>
   </section>
   {% endif %}

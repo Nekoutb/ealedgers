@@ -15,7 +15,8 @@ Coverage:
   - APDepartment.handle() subscription gate (DepartmentDisabledError when disabled)
   - APDepartment.handle() returns a Proposal with correct fields when enabled
   - APDepartment.handle() chain_id threading
-  - APDepartment.execute() stub raises NotImplementedError
+  - APDepartment.execute() — Step 58 ERP execution (CAP.05/CAP.03 via saga or
+    local GL), execute_queue_item() approval bridge, ConnectorExecutionError
   - APDepartment.can_auto_approve() default False
 """
 
@@ -32,6 +33,7 @@ from agents.ap.department import (
     APManager,
     APProposer,
     APReviewer,
+    ConnectorExecutionError,
 )
 from agents.department import (
     BaseDepartment,
@@ -294,12 +296,14 @@ class APDepartmentHandleTests(TestCase):
         proposal = self._dept().handle({})
         self.assertTrue(proposal.chain_id)  # non-empty
 
-    # --- execute stub ---
+    # --- execute (Step 58 — implemented) ---
 
-    def test_execute_raises_not_implemented(self):
+    def test_execute_raises_value_error_without_proposer_output(self):
+        """A proposal whose pipeline halted before the proposer cannot be
+        executed — execute() raises ValueError (no longer NotImplementedError)."""
         dept = self._dept()
-        proposal = dept.handle({})
-        with self.assertRaises(NotImplementedError):
+        proposal = dept.handle({})  # no file → extractor fails → no proposer output
+        with self.assertRaises(ValueError):
             dept.execute(proposal)
 
     # --- can_auto_approve default ---
@@ -1288,3 +1292,230 @@ class ReviewerStructuralChecksTests(TestCase):
             {"account": "401100", "debit": "0.00", "credit": "100.00"},
         ], date=""))
         self.assertTrue(any("no date" in i for i in issues))
+
+
+# ---------------------------------------------------------------------------
+# APDepartment.execute() — Step 58 ERP execution (CAP.05 + CAP.03)
+# ---------------------------------------------------------------------------
+
+class _FakeConnector:
+    """Minimal IConnector-shaped fake for execute() tests."""
+
+    vendor = "fake"
+
+    def __init__(self, caps=("CAP.03",), result=None, raise_exc=None):
+        self._caps = frozenset(caps)
+        self._result = result or {"external_id": 555, "state": "posted"}
+        self._raise = raise_exc
+        self.calls = []
+
+    def supports(self, code):
+        return code in self._caps
+
+    def post_journal_entry(self, **kw):
+        self.calls.append(("CAP.03", kw))
+        if self._raise:
+            raise self._raise
+        return dict(self._result)
+
+    def execute(self, code, **kw):
+        self.calls.append((code, kw))
+        if self._raise:
+            raise self._raise
+        return dict(self._result)
+
+
+def _je_lines():
+    return [
+        {"account": "628100", "label": "Telephone", "debit": "70000.00",
+         "credit": "0.00", "partner_vat": ""},
+        {"account": "445200", "label": "TVA récupérable", "debit": "13475.00",
+         "credit": "0.00", "partner_vat": ""},
+        {"account": "401100", "label": "MTN Cameroon", "debit": "0.00",
+         "credit": "83475.00", "partner_vat": "M0215X"},
+    ]
+
+
+def _proposal_with_je(tenant_id, lines="default", journal="ACH"):
+    from agents.department import Proposal, SpecialistResult
+    je = {"date": "2026-03-15", "ref": "FAC-0042", "journal_code": journal,
+          "lines": _je_lines() if lines == "default" else lines}
+    return Proposal(
+        dept_code="D01", tenant_id=tenant_id, action="Post vendor bill",
+        inputs={}, chain_id="chain-58",
+        specialist_results=[SpecialistResult("proposer", {"proposed_je": je}, True)],
+    )
+
+
+class APExecuteTests(TestCase):
+    """APDepartment.execute() posts an approved proposal to the connector."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant
+        cls.currency = Currency.objects.create(
+            code="XAF_58", name="CFA (58)", symbol="XAF", decimal_places=0)
+        cls.tenant = Tenant.objects.create(
+            name="Exec Co", slug="exec-co-58", currency=cls.currency)
+
+    # --- CAP.03 direct (standalone, no ERPConnection) -----------------------
+
+    def test_execute_posts_via_cap03(self):
+        fake = _FakeConnector(caps=("CAP.03",))
+        dept = APDepartment(self.tenant, connector=fake)
+        result = dept.execute(_proposal_with_je(self.tenant.id))
+        self.assertTrue(result["posted"])
+        self.assertEqual(result["capability"], "CAP.03")
+        self.assertEqual(result["external_id"], 555)
+        self.assertIsNone(result["operation_id"])  # no saga (standalone)
+        # the connector received mapped lines (account_code, post=True)
+        cap, kw = fake.calls[0]
+        self.assertEqual(cap, "CAP.03")
+        self.assertTrue(kw["post"])
+        self.assertEqual(kw["lines"][0]["account_code"], "628100")
+        self.assertEqual(kw["lines"][0]["name"], "Telephone")
+        self.assertEqual(kw["journal_code"], "ACH")
+
+    def test_execute_prefers_cap05_when_supported(self):
+        fake = _FakeConnector(caps=("CAP.03", "CAP.05"), result={"external_id": 9, "state": "posted"})
+        dept = APDepartment(self.tenant, connector=fake)
+        result = dept.execute(_proposal_with_je(self.tenant.id))
+        self.assertEqual(result["capability"], "CAP.05")
+        self.assertEqual(fake.calls[0][0], "CAP.05")
+
+    def test_execute_raises_without_proposed_je(self):
+        from agents.department import Proposal, SpecialistResult
+        proposal = Proposal(
+            dept_code="D01", tenant_id=self.tenant.id, action="x", inputs={},
+            specialist_results=[SpecialistResult("extractor", {}, False, "boom")],
+        )
+        dept = APDepartment(self.tenant, connector=_FakeConnector())
+        with self.assertRaises(ValueError):
+            dept.execute(proposal)
+
+    def test_execute_raises_with_empty_lines(self):
+        dept = APDepartment(self.tenant, connector=_FakeConnector())
+        with self.assertRaises(ValueError):
+            dept.execute(_proposal_with_je(self.tenant.id, lines=[]))
+
+    # --- saga path (real ERPConnection present) -----------------------------
+
+    def test_execute_uses_saga_when_connection_exists(self):
+        from accounting.models import ERPConnection, ERPOperation
+        ERPConnection.objects.create(
+            tenant=self.tenant, name="Test Odoo", vendor="odoo", is_active=True)
+        fake = _FakeConnector(caps=("CAP.03",), result={"external_id": 77, "state": "posted"})
+        dept = APDepartment(self.tenant, connector=fake)
+        result = dept.execute(_proposal_with_je(self.tenant.id))
+        self.assertEqual(result["external_id"], 77)
+        self.assertIsNotNone(result["operation_id"])
+        op = ERPOperation.objects.get(pk=result["operation_id"])
+        self.assertEqual(op.status, "success")
+        self.assertEqual(op.external_ids, {"external_id": 77})
+
+    def test_execute_raises_connector_error_on_saga_failure(self):
+        from accounting.models import ERPConnection, ERPOperation
+        ERPConnection.objects.create(
+            tenant=self.tenant, name="Test Odoo", vendor="odoo", is_active=True)
+        fake = _FakeConnector(raise_exc=RuntimeError("odoo down"))
+        dept = APDepartment(self.tenant, connector=fake)
+        with self.assertRaises(ConnectorExecutionError):
+            dept.execute(_proposal_with_je(self.tenant.id))
+        self.assertEqual(ERPOperation.objects.filter(status="failed").count(), 1)
+
+    def test_manual_connection_is_treated_as_standalone(self):
+        from accounting.models import ERPConnection
+        ERPConnection.objects.create(
+            tenant=self.tenant, name="None", vendor="manual", is_active=True)
+        fake = _FakeConnector()
+        result = APDepartment(self.tenant, connector=fake).execute(
+            _proposal_with_je(self.tenant.id))
+        self.assertIsNone(result["operation_id"])  # manual => no saga
+
+
+class APExecuteLocalGLTests(TestCase):
+    """execute() against the real LocalGLConnector posts to the local ledger."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant, Account, Journal
+        cls.currency = Currency.objects.create(
+            code="XAF_58L", name="CFA (58L)", symbol="XAF", decimal_places=0)
+        cls.tenant = Tenant.objects.create(
+            name="Local Exec Co", slug="local-exec-58", currency=cls.currency)
+        for code, name, typ in [
+            ("628100", "Telephone charges", "expense_direct_cost"),
+            ("445200", "VAT recoverable", "liability_current"),
+            ("401100", "Suppliers", "payable"),
+        ]:
+            Account.objects.create(tenant=cls.tenant, code=code, name=name, type=typ)
+        Journal.objects.create(tenant=cls.tenant, name="Purchases", code="ACH",
+                               type="purchase")
+
+    def test_execute_posts_balanced_entry_to_local_gl(self):
+        from accounting.models import JournalEntry, JournalEntryLine
+        # No connector injected → connector_for_tenant => LocalGLConnector
+        dept = APDepartment(self.tenant)
+        result = dept.execute(_proposal_with_je(self.tenant.id))
+        self.assertTrue(result["posted"])
+        self.assertEqual(result["capability"], "CAP.03")
+        entry = JournalEntry.objects.get(pk=result["external_id"])
+        self.assertEqual(entry.state, "posted")
+        self.assertEqual(entry.tenant_id, self.tenant.id)
+        lines = JournalEntryLine.objects.filter(entry=entry)
+        self.assertEqual(lines.count(), 3)
+        total_debit = sum(l.debit for l in lines)
+        total_credit = sum(l.credit for l in lines)
+        self.assertEqual(total_debit, total_credit)
+
+
+class APExecuteQueueItemTests(TestCase):
+    """execute_queue_item() bridges an approved ApprovalQueueItem to execute()."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant, ApprovalQueueItem
+        cls.currency = Currency.objects.create(
+            code="XAF_58Q", name="CFA (58Q)", symbol="XAF", decimal_places=0)
+        cls.tenant = Tenant.objects.create(
+            name="Queue Exec Co", slug="queue-exec-58", currency=cls.currency)
+
+    def _item(self, status="approved", results=None):
+        from accounting.models import ApprovalQueueItem
+        return ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code="D01", action="Post vendor bill",
+            inputs={}, chain_id="chain-58q", status=status,
+            specialist_results=results if results is not None else [
+                {"specialist_type": "proposer", "ok": True, "error": "",
+                 "output": {"proposed_je": {"date": "2026-03-15", "ref": "F1",
+                            "journal_code": "ACH", "lines": _je_lines()}}},
+            ],
+        )
+
+    def test_execute_queue_item_marks_executed(self):
+        item = self._item()
+        fake = _FakeConnector(result={"external_id": 321, "state": "posted"})
+        result = APDepartment(self.tenant, connector=fake).execute_queue_item(item)
+        item.refresh_from_db()
+        self.assertEqual(item.status, "executed")
+        self.assertEqual(item.metadata["execution"]["external_id"], 321)
+        self.assertEqual(result["external_id"], 321)
+
+    def test_execute_queue_item_rejects_unapproved(self):
+        item = self._item(status="pending")
+        with self.assertRaises(ValueError):
+            APDepartment(self.tenant, connector=_FakeConnector()).execute_queue_item(item)
+        item.refresh_from_db()
+        self.assertEqual(item.status, "pending")
+
+    def test_execute_queue_item_marks_failed_on_error(self):
+        from accounting.models import ERPConnection
+        ERPConnection.objects.create(
+            tenant=self.tenant, name="Odoo", vendor="odoo", is_active=True)
+        item = self._item()
+        fake = _FakeConnector(raise_exc=RuntimeError("boom"))
+        with self.assertRaises(ConnectorExecutionError):
+            APDepartment(self.tenant, connector=fake).execute_queue_item(item)
+        item.refresh_from_db()
+        self.assertEqual(item.status, "execution_failed")
+        self.assertIn("boom", item.review_note)

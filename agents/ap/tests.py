@@ -17,6 +17,8 @@ Coverage:
   - APDepartment.handle() chain_id threading
   - APDepartment.execute() — Step 58 ERP execution (CAP.05/CAP.03 via saga or
     local GL), execute_queue_item() approval bridge, ConnectorExecutionError
+  - bill.posted event — Step 59 emission on successful post (payload, chain_id
+    threading, subscriber delivery, best-effort emission)
   - APDepartment.can_auto_approve() default False
 """
 
@@ -24,7 +26,11 @@ import os
 import tempfile
 from unittest.mock import MagicMock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
+
+# Run the event bus inline so emit() dispatches handlers without a Q2 worker
+# (used by the Step 58/59 execute + bill.posted tests).
+_SYNC_Q = {"name": "ealedgers", "orm": "default", "sync": True, "workers": 1}
 
 from agents.ap.department import (
     APClassifier,
@@ -1347,6 +1353,7 @@ def _proposal_with_je(tenant_id, lines="default", journal="ACH"):
     )
 
 
+@override_settings(Q_CLUSTER=_SYNC_Q)
 class APExecuteTests(TestCase):
     """APDepartment.execute() posts an approved proposal to the connector."""
 
@@ -1433,6 +1440,7 @@ class APExecuteTests(TestCase):
         self.assertIsNone(result["operation_id"])  # manual => no saga
 
 
+@override_settings(Q_CLUSTER=_SYNC_Q)
 class APExecuteLocalGLTests(TestCase):
     """execute() against the real LocalGLConnector posts to the local ledger."""
 
@@ -1469,6 +1477,7 @@ class APExecuteLocalGLTests(TestCase):
         self.assertEqual(total_debit, total_credit)
 
 
+@override_settings(Q_CLUSTER=_SYNC_Q)
 class APExecuteQueueItemTests(TestCase):
     """execute_queue_item() bridges an approved ApprovalQueueItem to execute()."""
 
@@ -1519,3 +1528,112 @@ class APExecuteQueueItemTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.status, "execution_failed")
         self.assertIn("boom", item.review_note)
+
+
+# ---------------------------------------------------------------------------
+# Step 59 — AP emits bill.posted on a successful post
+# ---------------------------------------------------------------------------
+
+def _proposal_with_extractor_and_je(tenant_id):
+    from agents.department import Proposal, SpecialistResult
+    je = {"date": "2026-03-15", "ref": "FAC-0042", "journal_code": "ACH",
+          "lines": _je_lines()}
+    return Proposal(
+        dept_code="D01", tenant_id=tenant_id, action="Post vendor bill",
+        inputs={"ap_document_id": 4242}, chain_id="chain-59",
+        specialist_results=[
+            SpecialistResult("extractor", {
+                "vendor_name": "MTN Cameroon", "vendor_vat": "M0215X",
+                "total": 83475, "currency": "XAF"}, True),
+            SpecialistResult("proposer", {"proposed_je": je}, True),
+        ],
+    )
+
+
+@override_settings(Q_CLUSTER=_SYNC_Q)
+class APBillPostedEventTests(TestCase):
+    """execute() emits a bill.posted BusEvent that subscribers can attach to."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Currency, Tenant
+        cls.currency = Currency.objects.create(
+            code="XAF_59", name="CFA (59)", symbol="XAF", decimal_places=0)
+        cls.tenant = Tenant.objects.create(
+            name="Event Co", slug="event-co-59", currency=cls.currency)
+
+    def setUp(self):
+        from agents.events import clear_subscriptions
+        clear_subscriptions()
+
+    def tearDown(self):
+        from agents.events import clear_subscriptions
+        clear_subscriptions()
+
+    def _execute(self):
+        fake = _FakeConnector(result={"external_id": 4242, "state": "posted"})
+        dept = APDepartment(self.tenant, connector=fake)
+        return dept.execute(_proposal_with_extractor_and_je(self.tenant.id))
+
+    def test_execute_creates_bill_posted_event(self):
+        from accounting.models import BusEvent
+        result = self._execute()
+        ev = BusEvent.objects.get(tenant=self.tenant, event_type="bill.posted")
+        self.assertEqual(result["event_id"], ev.id)
+        self.assertEqual(ev.chain_id, "chain-59")
+
+    def test_event_payload_carries_bill_details(self):
+        from accounting.models import BusEvent
+        self._execute()
+        ev = BusEvent.objects.get(tenant=self.tenant, event_type="bill.posted")
+        self.assertEqual(ev.payload["dept_code"], "D01")
+        self.assertEqual(ev.payload["external_id"], 4242)
+        self.assertEqual(ev.payload["vendor_name"], "MTN Cameroon")
+        self.assertEqual(ev.payload["vendor_vat"], "M0215X")
+        self.assertEqual(ev.payload["total"], 83475)
+        self.assertEqual(ev.payload["ap_document_id"], 4242)
+
+    def test_subscriber_receives_the_event(self):
+        from agents.events import subscribe
+        received = []
+
+        def handler(event_type, payload, tenant, chain_id):
+            received.append((event_type, chain_id, payload.get("external_id")))
+
+        subscribe("bill.posted", handler)
+        self._execute()
+        self.assertEqual(received, [("bill.posted", "chain-59", 4242)])
+
+    def test_no_event_when_execution_fails(self):
+        from accounting.models import BusEvent
+        dept = APDepartment(self.tenant, connector=_FakeConnector())
+        with self.assertRaises(ValueError):
+            dept.execute(_proposal_with_je(self.tenant.id, lines=[]))
+        self.assertFalse(
+            BusEvent.objects.filter(event_type="bill.posted").exists())
+
+    def test_emit_failure_does_not_break_execute(self):
+        from unittest.mock import patch
+        with patch("agents.events.emit", side_effect=RuntimeError("bus down")):
+            result = self._execute()
+        # Post still succeeded; event id is None, no exception raised.
+        self.assertTrue(result["posted"])
+        self.assertIsNone(result["event_id"])
+
+    def test_execute_queue_item_also_emits(self):
+        from accounting.models import ApprovalQueueItem, BusEvent
+        item = ApprovalQueueItem.objects.create(
+            tenant=self.tenant, dept_code="D01", action="Post vendor bill",
+            inputs={"ap_document_id": 4242}, chain_id="chain-59q",
+            status="approved",
+            specialist_results=[{
+                "specialist_type": "proposer", "ok": True, "error": "",
+                "output": {"proposed_je": {"date": "2026-03-15", "ref": "F1",
+                           "journal_code": "ACH", "lines": _je_lines()}}}],
+        )
+        fake = _FakeConnector(result={"external_id": 7, "state": "posted"})
+        APDepartment(self.tenant, connector=fake).execute_queue_item(item)
+        self.assertTrue(
+            BusEvent.objects.filter(
+                tenant=self.tenant, event_type="bill.posted",
+                chain_id="chain-59q").exists())

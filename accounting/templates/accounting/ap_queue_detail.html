@@ -1,0 +1,247 @@
+{% load static humanize %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proposal #{{ item.pk }} · AP Approval Queue · EA Ledgers</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44' fill='%230A0A0A'%3E%3Crect width='56' height='8'/%3E%3Crect y='18' width='36' height='8'/%3E%3Crect y='36' width='56' height='8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'accounting/main.css' %}">
+</head>
+<body class="min-h-screen flex flex-col bg-neutral-50">
+
+<!-- top bar -->
+<header class="border-b border-neutral-200 bg-white sticky top-0 z-20">
+  <div class="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3 min-w-0">
+      <a href="/workspace/" class="flex items-center gap-2.5 text-neutral-950 hover:text-neutral-700 transition flex-shrink-0">
+        <svg class="w-5 h-auto" viewBox="0 0 60 44" fill="currentColor" aria-hidden="true">
+          <rect width="56" height="8"/><rect y="18" width="36" height="8"/><rect y="36" width="56" height="8"/>
+        </svg>
+        <span class="text-sm font-semibold tracking-tight">EA Ledgers</span>
+      </a>
+      <span class="text-neutral-300">/</span>
+      <a href="/ap/queue/" class="text-sm text-neutral-500 hover:text-neutral-800">Approval Queue</a>
+      <span class="text-neutral-300">/</span>
+      <span class="text-sm font-medium text-neutral-800">#{{ item.pk }}</span>
+    </div>
+    <span class="hidden md:inline text-sm text-neutral-600">{{ user.username }}</span>
+  </div>
+</header>
+
+<main class="flex-1 max-w-4xl mx-auto w-full px-6 py-10">
+
+  <div class="mb-6">
+    <p class="text-eyebrow mb-1">D01 — Accounts Payable · Proposal #{{ item.pk }}</p>
+    <h1 class="text-2xl font-semibold tracking-tight text-neutral-950">
+      {{ summary.vendor|default:"Candidate journal entry" }}
+    </h1>
+    <p class="text-sm text-neutral-500 mt-1">
+      Status: <strong>{{ item.get_status_display }}</strong>
+      · chain <code class="apqd-mono">{{ item.chain_id|slice:":12" }}</code>
+      {% if item.chain_id %}· <a href="/workspace/chains/{{ item.chain_id }}/" class="apqd-link">audit trail →</a>{% endif %}
+    </p>
+  </div>
+
+  {% if reject_error %}
+  <div class="apqd-banner apqd-banner--err">{{ reject_error }}</div>
+  {% endif %}
+
+  <!-- proposed journal entry -->
+  <section class="apqd-card">
+    <div class="apqd-card-head">
+      <h2 class="apqd-h2">Proposed journal entry</h2>
+      <div class="apqd-head-meta">
+        {% if summary.journal_code %}<span>journal {{ summary.journal_code }}</span>{% endif %}
+        {% if summary.date %}<span>{{ summary.date }}</span>{% endif %}
+        {% if summary.ref %}<span>{{ summary.ref }}</span>{% endif %}
+      </div>
+    </div>
+
+    {% if summary.has_proposal %}
+      <table class="apqd-je">
+        <thead>
+          <tr><th>Account</th><th>Label</th><th class="apqd-num">Debit</th><th class="apqd-num">Credit</th></tr>
+        </thead>
+        <tbody>
+          {% for line in summary.je_lines %}
+          <tr>
+            <td class="apqd-mono">{{ line.account }}</td>
+            <td>{{ line.label }}{% if line.partner_vat %}<span class="apqd-vat">VAT {{ line.partner_vat }}</span>{% endif %}</td>
+            <td class="apqd-num apqd-mono">{% if line.debit != "0.00" %}{{ line.debit }}{% else %}—{% endif %}</td>
+            <td class="apqd-num apqd-mono">{% if line.credit != "0.00" %}{{ line.credit }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2" class="apqd-total-label">
+              Total ({{ summary.currency }})
+              {% if summary.balanced %}<span class="apqd-bal apqd-bal--ok">balanced</span>
+              {% else %}<span class="apqd-bal apqd-bal--no">unbalanced</span>{% endif %}
+              {% if summary.total_matches is False %}<span class="apqd-bal apqd-bal--warn">≠ document total</span>{% endif %}
+            </td>
+            <td class="apqd-num apqd-mono">{{ summary.debit_total }}</td>
+            <td class="apqd-num apqd-mono">{{ summary.credit_total }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    {% else %}
+      <p class="apqd-incomplete">
+        No journal entry was produced — the specialist pipeline did not complete.
+        See the diagnostics below.
+      </p>
+    {% endif %}
+
+    {% if summary.proposer_issues %}
+    <div class="apqd-issues">
+      <p class="apqd-issues-title">Proposer notes</p>
+      <ul>{% for i in summary.proposer_issues %}<li>{{ i }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- reviewer verdict -->
+  <section class="apqd-card">
+    <div class="apqd-card-head">
+      <h2 class="apqd-h2">Adversarial reviewer</h2>
+      {% if summary.reviewer_ran %}
+        {% if summary.reviewer_approved %}
+          <span class="apqd-verdict apqd-verdict--ok">confirmed</span>
+        {% else %}
+          <span class="apqd-verdict apqd-verdict--no">rejected</span>
+        {% endif %}
+      {% else %}
+        <span class="apqd-verdict apqd-verdict--na">did not run</span>
+      {% endif %}
+    </div>
+
+    {% if summary.review_notes %}<p class="apqd-review-notes">{{ summary.review_notes }}</p>{% endif %}
+
+    {% if summary.citations %}
+    <table class="apqd-cites">
+      <thead><tr><th>Rule</th><th>Reference</th><th>Verdict</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for c in summary.citations %}
+        <tr>
+          <td class="apqd-mono">{{ c.rule_slug }}</td>
+          <td>{{ c.source_ref }}</td>
+          <td><span class="apqd-cite apqd-cite--{{ c.verdict }}">{{ c.verdict }}</span></td>
+          <td class="apqd-cite-notes">{{ c.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% elif summary.reviewer_ran %}
+      <p class="apqd-muted">No specific rule citations were recorded.</p>
+    {% endif %}
+
+    {% if summary.structural_issues %}
+    <div class="apqd-issues">
+      <p class="apqd-issues-title">Structural problems</p>
+      <ul>{% for i in summary.structural_issues %}<li>{{ i }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- pipeline diagnostics (only when something failed) -->
+  {% if summary.pipeline_errors %}
+  <section class="apqd-card">
+    <h2 class="apqd-h2 mb-2">Pipeline diagnostics</h2>
+    <ul class="apqd-errs">
+      {% for e in summary.pipeline_errors %}
+      <li><span class="apqd-mono">{{ e.specialist_type }}</span> — {{ e.error }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <!-- decision -->
+  {% if item.is_pending %}
+  <section class="apqd-decision">
+    <h2 class="apqd-h2 mb-1">Decision</h2>
+    <p class="apqd-muted mb-3">
+      Approving advances the entry to posting (Step&nbsp;58); it is not yet written to the ERP.
+      A reason is required to reject.
+    </p>
+    <form method="post" action="{% url 'ap_queue_detail' item.pk %}">
+      {% csrf_token %}
+      <textarea name="note" rows="3" class="apqd-note"
+                placeholder="Reason / note (required to reject, optional to approve)">{% if reject_error %}{{ request.POST.note }}{% endif %}</textarea>
+      <div class="apqd-decision-actions">
+        <button type="submit" name="action" value="approve" class="apqd-btn apqd-btn--approve">Approve</button>
+        <button type="submit" name="action" value="reject" class="apqd-btn apqd-btn--reject">Reject</button>
+        <a href="/ap/queue/" class="btn btn-ghost text-xs">Cancel</a>
+      </div>
+    </form>
+  </section>
+  {% else %}
+  <section class="apqd-decision apqd-decision--done">
+    <p>
+      This proposal was <strong>{{ item.get_status_display }}</strong>
+      {% if item.reviewed_by %}by {{ item.reviewed_by.username }}{% endif %}
+      {% if item.reviewed_at %}{{ item.reviewed_at|naturaltime }}{% endif %}.
+    </p>
+    {% if item.review_note %}<p class="apqd-muted mt-1">“{{ item.review_note }}”</p>{% endif %}
+    <a href="/ap/queue/" class="btn btn-ghost text-xs mt-3">← Back to queue</a>
+  </section>
+  {% endif %}
+
+</main>
+
+<style>
+  .apqd-mono { font-family:"Geist Mono",monospace; }
+  .apqd-link { color:#2563eb; text-decoration:none; } .apqd-link:hover { text-decoration:underline; }
+  .apqd-muted { color:#737373; font-size:.82rem; }
+
+  .apqd-banner { border-radius:10px; padding:.7rem 1rem; font-size:.85rem; margin-bottom:1.2rem; }
+  .apqd-banner--err { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; }
+
+  .apqd-card { background:#fff; border:1px solid #e5e5e5; border-radius:16px; padding:1.3rem 1.4rem; margin-bottom:1.2rem; }
+  .apqd-card-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .apqd-h2 { font-size:1rem; font-weight:650; letter-spacing:-.01em; color:#0a0a0a; }
+  .apqd-head-meta { display:flex; gap:.8rem; font-size:.78rem; color:#737373; flex-wrap:wrap; }
+
+  .apqd-je, .apqd-cites { width:100%; border-collapse:collapse; font-size:.84rem; }
+  .apqd-je th, .apqd-cites th { text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.04em;
+                                color:#a3a3a3; font-weight:600; padding:.3rem .6rem; border-bottom:1px solid #ececec; }
+  .apqd-je td, .apqd-cites td { padding:.5rem .6rem; border-bottom:1px solid #f4f4f4; vertical-align:top; }
+  .apqd-num { text-align:right; }
+  .apqd-vat { display:block; font-size:.7rem; color:#a3a3a3; }
+  .apqd-je tfoot td { border-top:2px solid #e5e5e5; border-bottom:none; font-weight:600; padding-top:.6rem; }
+  .apqd-total-label { color:#404040; }
+  .apqd-bal { font-size:.66rem; font-weight:600; border-radius:99px; padding:.1rem .45rem; margin-left:.5rem; }
+  .apqd-bal--ok { background:#ecfdf5; color:#047857; } .apqd-bal--no { background:#fef2f2; color:#b91c1c; }
+  .apqd-bal--warn { background:#fffbeb; color:#92400e; }
+  .apqd-incomplete { color:#92400e; font-size:.85rem; }
+
+  .apqd-issues { margin-top:1rem; background:#fafafa; border:1px solid #ececec; border-radius:10px; padding:.7rem .9rem; }
+  .apqd-issues-title { font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; color:#737373; font-weight:600; margin-bottom:.3rem; }
+  .apqd-issues ul, .apqd-errs { margin:0; padding-left:1.1rem; font-size:.8rem; color:#525252; }
+  .apqd-issues li, .apqd-errs li { margin:.15rem 0; }
+
+  .apqd-verdict { font-size:.7rem; font-weight:600; border-radius:99px; padding:.15rem .6rem; }
+  .apqd-verdict--ok { background:#ecfdf5; color:#047857; }
+  .apqd-verdict--no { background:#fef2f2; color:#b91c1c; }
+  .apqd-verdict--na { background:#f5f5f5; color:#737373; }
+  .apqd-review-notes { font-size:.85rem; color:#404040; margin-bottom:1rem; line-height:1.5; }
+  .apqd-cite { font-size:.68rem; font-weight:600; border-radius:99px; padding:.1rem .5rem; }
+  .apqd-cite--pass { background:#ecfdf5; color:#047857; }
+  .apqd-cite--fail { background:#fef2f2; color:#b91c1c; }
+  .apqd-cite--warning { background:#fffbeb; color:#92400e; }
+  .apqd-cite-notes { color:#525252; }
+
+  .apqd-decision { background:#fff; border:1px solid #e5e5e5; border-radius:16px; padding:1.3rem 1.4rem; }
+  .apqd-decision--done { color:#404040; font-size:.88rem; }
+  .apqd-note { width:100%; border:1px solid #d4d4d4; border-radius:10px; padding:.6rem .8rem;
+               font-family:inherit; font-size:.85rem; resize:vertical; box-sizing:border-box; }
+  .apqd-note:focus { outline:none; border-color:#0a0a0a; }
+  .apqd-decision-actions { display:flex; align-items:center; gap:.7rem; margin-top:.8rem; }
+  .apqd-btn { font-size:.85rem; font-weight:600; border:none; border-radius:9px; padding:.55rem 1.3rem; cursor:pointer; }
+  .apqd-btn--approve { background:#047857; color:#fff; } .apqd-btn--approve:hover { background:#065f46; }
+  .apqd-btn--reject { background:#fff; color:#b91c1c; border:1px solid #fecaca; } .apqd-btn--reject:hover { background:#fef2f2; }
+</style>
+</body>
+</html>

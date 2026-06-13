@@ -3643,3 +3643,189 @@ class APEmailWebhookTests(TestCase):
         ev = BusEvent.objects.filter(tenant=self.tenant, event_type='bill.received').last()
         self.assertIsNotNone(ev)
         self.assertEqual(ev.payload.get('source'), 'email')
+
+
+# ---------------------------------------------------------------------------
+# Step 57 — AP Approval-Queue UI (one-click approve / reject)
+# ---------------------------------------------------------------------------
+
+def _proposer_output(balanced=True, total_matches=True, needs_review=False, issues=None):
+    return {
+        "proposed_je": {
+            "date": "2026-03-15", "ref": "FAC-0042", "journal_code": "ACH",
+            "lines": [
+                {"account": "628100", "label": "Telephone charges",
+                 "debit": "70000.00", "credit": "0.00", "partner_vat": ""},
+                {"account": "445200", "label": "TVA récupérable",
+                 "debit": "13475.00", "credit": "0.00", "partner_vat": ""},
+                {"account": "401100", "label": "MTN Cameroon",
+                 "debit": "0.00", "credit": "83475.00", "partner_vat": "M0215X"},
+            ],
+        },
+        "debit_total": "83475.00", "credit_total": "83475.00",
+        "balanced": balanced, "currency": "XAF", "total_matches": total_matches,
+        "issues": issues or [], "needs_review": needs_review,
+    }
+
+
+def _full_specialist_results():
+    return [
+        {"specialist_type": "extractor", "ok": True, "error": "",
+         "output": {"vendor_name": "MTN Cameroon", "total": 83475, "currency": "XAF",
+                    "invoice_date": "2026-03-15", "invoice_number": "FAC-0042"}},
+        {"specialist_type": "classifier", "ok": True, "error": "",
+         "output": {"classified_lines": [{"description": "Telephone charges",
+                    "suggested_account": "628100", "confidence": "high"}]}},
+        {"specialist_type": "proposer", "ok": True, "error": "", "output": _proposer_output()},
+        {"specialist_type": "reviewer", "ok": True, "error": "",
+         "output": {"approved": True, "review_notes": "Compliant telecom expense.",
+                    "citations": [{"rule_slug": "cgi-telephone", "source_ref": "CGI art.7",
+                                   "verdict": "pass", "notes": "Deductible."}],
+                    "structural_issues": []}},
+    ]
+
+
+class APQueueViewTests(TestCase):
+    """Step 57 — the AP approval-queue list + detail views and approve/reject."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = Currency.objects.create(
+            code="XAF_57", name="CFA (57)", symbol="XAF", decimal_places=0)
+        cls.tenant = _make_tenant("ap57", currency=cls.currency)
+        cls.other = _make_tenant("ap57-other", currency=cls.currency)
+        cls.user = get_user_model().objects.create_user("ap57user", password="pw")
+        Membership.objects.create(user=cls.user, tenant=cls.tenant, role="owner")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _item(self, *, tenant=None, status="pending", dept="D01",
+              results=None, action="Post vendor bill MTN Cameroon"):
+        return ApprovalQueueItem.objects.create(
+            tenant=tenant or self.tenant, dept_code=dept, action=action,
+            inputs={"ap_document_id": 1},
+            specialist_results=results if results is not None else _full_specialist_results(),
+            chain_id="chain-57-abcdef", status=status,
+        )
+
+    # --- list view ----------------------------------------------------------
+
+    def test_list_requires_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get("/ap/queue/").status_code, 302)
+
+    def test_list_renders_pending_item(self):
+        self._item()
+        r = self.client.get("/ap/queue/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "MTN Cameroon")
+        self.assertContains(r, "Approve")
+
+    def test_list_only_shows_d01(self):
+        self._item(dept="D05", action="Some GL entry")
+        r = self.client.get("/ap/queue/")
+        self.assertNotContains(r, "Some GL entry")
+
+    def test_list_is_tenant_scoped(self):
+        self._item(tenant=self.other, action="Other tenant bill")
+        r = self.client.get("/ap/queue/")
+        self.assertNotContains(r, "Other tenant bill")
+
+    def test_list_shows_reviewer_confirmed_badge(self):
+        self._item()
+        r = self.client.get("/ap/queue/")
+        self.assertContains(r, "reviewer: confirmed")
+
+    def test_list_empty_state(self):
+        r = self.client.get("/ap/queue/")
+        self.assertContains(r, "No proposals are awaiting approval")
+
+    # --- detail view ---------------------------------------------------------
+
+    def test_detail_renders_je_lines(self):
+        item = self._item()
+        r = self.client.get(f"/ap/queue/{item.pk}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "628100")
+        self.assertContains(r, "445200")
+        self.assertContains(r, "401100")
+        self.assertContains(r, "balanced")
+        self.assertContains(r, "CGI art.7")  # citation source_ref
+
+    def test_detail_cross_tenant_404(self):
+        item = self._item(tenant=self.other)
+        self.assertEqual(self.client.get(f"/ap/queue/{item.pk}/").status_code, 404)
+
+    def test_detail_handles_incomplete_pipeline(self):
+        """A pipeline that halted at the extractor still renders (no JE)."""
+        item = self._item(results=[
+            {"specialist_type": "extractor", "ok": False,
+             "error": "No file_path or document_path in input_data.", "output": {}},
+        ])
+        r = self.client.get(f"/ap/queue/{item.pk}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "pipeline did not complete")
+        self.assertContains(r, "No file_path")
+
+    # --- one-click approve ---------------------------------------------------
+
+    def test_approve_one_click_from_list(self):
+        item = self._item()
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "approve"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("done=approved", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "approved")
+        self.assertEqual(item.reviewed_by, self.user)
+
+    def test_approve_with_note(self):
+        item = self._item()
+        self.client.post(f"/ap/queue/{item.pk}/", {"action": "approve", "note": "LGTM"})
+        item.refresh_from_db()
+        self.assertEqual(item.status, "approved")
+        self.assertEqual(item.review_note, "LGTM")
+
+    # --- reject --------------------------------------------------------------
+
+    def test_reject_requires_note(self):
+        item = self._item()
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "reject", "note": ""})
+        self.assertEqual(r.status_code, 200)  # re-renders with error, no redirect
+        self.assertContains(r, "reason is required")
+        item.refresh_from_db()
+        self.assertEqual(item.status, "pending")
+
+    def test_reject_with_note(self):
+        item = self._item()
+        r = self.client.post(f"/ap/queue/{item.pk}/",
+                             {"action": "reject", "note": "Wrong account."})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("done=rejected", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "rejected")
+        self.assertEqual(item.review_note, "Wrong account.")
+
+    # --- guards --------------------------------------------------------------
+
+    def test_acting_on_reviewed_item_is_noop(self):
+        item = self._item(status="approved")
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "approve"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("done=already", r["Location"])
+        item.refresh_from_db()
+        self.assertEqual(item.status, "approved")  # unchanged, reviewer not overwritten
+        self.assertIsNone(item.reviewed_by)
+
+    def test_unknown_action_is_bad_request(self):
+        item = self._item()
+        r = self.client.post(f"/ap/queue/{item.pk}/", {"action": "frobnicate"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_reviewed_item_detail_shows_outcome(self):
+        item = self._item(status="rejected")
+        item.review_note = "Not deductible."
+        item.save(update_fields=["review_note"])
+        r = self.client.get(f"/ap/queue/{item.pk}/")
+        self.assertContains(r, "Not deductible.")
+        self.assertNotContains(r, 'name="action" value="approve"')  # no decision form

@@ -807,3 +807,136 @@ def ap_email_webhook(request):
         docs_created += 1
 
     return JsonResponse({'status': 'ok', 'docs_created': docs_created})
+
+
+# ---------------------------------------------------------------------------
+# Step 57 — AP Approval-Queue UI (one-click approve / reject)
+# ---------------------------------------------------------------------------
+
+def _specialist_outputs(item):
+    """Index an ApprovalQueueItem's specialist_results by specialist_type.
+
+    Returns ``(by_type, errors)`` where ``by_type`` maps e.g. ``'proposer'``
+    to its output dict (only for specialists that succeeded), and ``errors``
+    is a list of ``{specialist_type, error}`` for those that failed.
+    """
+    by_type = {}
+    errors = []
+    for r in (item.specialist_results or []):
+        st = r.get('specialist_type', '')
+        if r.get('ok'):
+            by_type[st] = r.get('output') or {}
+        elif r.get('error'):
+            errors.append({'specialist_type': st, 'error': r.get('error')})
+    return by_type, errors
+
+
+def summarize_queue_item(item):
+    """Build a view-friendly summary of a proposal from its specialist outputs.
+
+    Resilient to a partially-run pipeline (a halted/failed specialist simply
+    leaves its section empty) so the UI always renders something useful.
+    """
+    by_type, errors = _specialist_outputs(item)
+    extractor = by_type.get('extractor', {})
+    proposer = by_type.get('proposer', {})
+    reviewer = by_type.get('reviewer', {})
+    je = proposer.get('proposed_je') or {}
+    reviewer_ran = 'reviewer' in by_type
+
+    return {
+        'item': item,
+        'vendor': extractor.get('vendor_name') or je.get('ref') or '',
+        'currency': proposer.get('currency') or extractor.get('currency') or '',
+        'date': je.get('date') or extractor.get('invoice_date') or '',
+        'ref': je.get('ref') or extractor.get('invoice_number') or '',
+        'je_lines': je.get('lines') or [],
+        'journal_code': je.get('journal_code') or '',
+        'debit_total': proposer.get('debit_total'),
+        'credit_total': proposer.get('credit_total'),
+        'balanced': proposer.get('balanced'),
+        'total_matches': proposer.get('total_matches'),
+        'proposer_issues': proposer.get('issues') or [],
+        'needs_review': proposer.get('needs_review'),
+        'has_proposal': bool(je),
+        'reviewer_ran': reviewer_ran,
+        'reviewer_approved': reviewer.get('approved') if reviewer_ran else None,
+        'review_notes': reviewer.get('review_notes', '') if reviewer_ran else '',
+        'citations': reviewer.get('citations') or [],
+        'structural_issues': reviewer.get('structural_issues') or [],
+        'classified_lines': by_type.get('classifier', {}).get('classified_lines') or [],
+        'pipeline_errors': errors,
+    }
+
+
+@login_required
+@tenant_required
+def ap_queue(request):
+    """AP approval queue — pending candidate journal entries for D01 (Step 57).
+
+    Lists pending ``ApprovalQueueItem`` proposals with a one-click Approve
+    action and a link through to the detail page (where Reject — which
+    requires a reason — and the full proposed JE / citations live).
+    """
+    qs = ApprovalQueueItem.objects.for_tenant(request.tenant).filter(dept_code='D01')
+    pending = list(qs.filter(status='pending').order_by('created_at')[:100])
+    reviewed = list(
+        qs.exclude(status='pending')
+        .select_related('reviewed_by')
+        .order_by('-reviewed_at', '-created_at')[:25]
+    )
+
+    return render(request, 'accounting/ap_queue.html', {
+        'pending': [summarize_queue_item(i) for i in pending],
+        'reviewed': reviewed,
+        'pending_count': len(pending),
+        'done': request.GET.get('done', ''),
+        'ref': request.GET.get('ref', ''),
+        'tenant_name': request.tenant.name,
+    })
+
+
+@login_required
+@tenant_required
+def ap_queue_detail(request, pk):
+    """Full detail of one AP proposal; POST performs approve / reject (Step 57).
+
+    Reject requires a reason (``note``); approve may carry an optional note.
+    Acting on an already-reviewed item is a safe no-op (redirects with a
+    notice) so a double-submit or stale tab cannot re-review.
+    """
+    item = get_object_or_404(
+        ApprovalQueueItem.objects.for_tenant(request.tenant),
+        pk=pk, dept_code='D01',
+    )
+
+    if request.method == 'POST':
+        action = request.POST.get('action', '')
+        note = request.POST.get('note', '').strip()
+        queue_url = reverse('ap_queue')
+
+        if not item.is_pending:
+            return redirect(f"{queue_url}?done=already&ref={item.pk}")
+
+        if action == 'approve':
+            item.approve(user=request.user, note=note)
+            return redirect(f"{queue_url}?done=approved&ref={item.pk}")
+
+        if action == 'reject':
+            if not note:
+                return render(request, 'accounting/ap_queue_detail.html', {
+                    'summary': summarize_queue_item(item),
+                    'item': item,
+                    'reject_error': 'A reason is required to reject a proposal.',
+                    'tenant_name': request.tenant.name,
+                })
+            item.reject(user=request.user, note=note)
+            return redirect(f"{queue_url}?done=rejected&ref={item.pk}")
+
+        return HttpResponseBadRequest('Unknown action.')
+
+    return render(request, 'accounting/ap_queue_detail.html', {
+        'summary': summarize_queue_item(item),
+        'item': item,
+        'tenant_name': request.tenant.name,
+    })
